@@ -1,0 +1,10 @@
+build/
+.DS_Store
+.commandcode/
+*.zip
+/tmp/
+.vscode/
+*.swp
+*.swo
+*~
+JUCE/

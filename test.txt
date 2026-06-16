@@ -1,0 +1,24 @@
+ Verified against the binary. The headline claim is a misread; the constants are mostly good.               
+                                                                                                            
+ The "Shape in recomputeGains" finding is incorrect. Disassembly of 0x2255c (it's setPan, arg = pan value): 
+ - movsd [rdi+0x10], xmm0 → stores the pan argument.                                                        
+ - ucomisd xmm2, [0x392a8]; jbe … → branches on pan ≤ 0.5 vs pan > 0.5 (the widening term). xmm2 is pan,    
+ not Shape.                                                                                                 
+ - It then reads +0x40 (panwidth), +0x48, +0x18 (panScale), +0x08 (volume) — all voice-internal fields,     
+ with zero access to the program struct / host params.                                                      
+                                                                                                            
+ So the >0.5 split is the pan-center branch (exactly what I decoded earlier), not Shape. The constant       
+ 0x392a8 = 0.5 is the pan center, which the table mislabels as "Shape threshold (raw↔smooth)" — it's one    
+ constant reused for two jobs. recomputeGains does not read Shape, so I should not add a Shape branch there 
+ (it would be inventing behavior).                                                                          
+                                                                                                            
+ What's good: the constants are mostly consistent with my decode — 0x393b8=0.75 ✓, 0x393b0=4096 ✓ (though   
+ it's the excitation phase-step 4096/N, not "table size divisor"; the table is 16384), 0x39158=1.0 ✓,       
+ 0x39430=1e-5 ✓, π/ln2 ✓. The two I hadn't decoded — 0x393c0=2.5 (noteToN Damper multiplier) and            
+ 0x39348=100 (velocity scale) — are plausible and worth wiring in. "No output waveshaper; Shape absent from 
+ the render loop" — confirmed correct.                                                                      
+                                                                                                            
+ Net: Shape's role stays as seedExcitation raw↔smooth selection only (which I empirically tested — it       
+ doesn't move the metric). The real tunables remain the coefficients I'm already fitting. So the productive 
+ path is still the CMA-ES fitter (not a Shape branch). Two genuinely useful takeaways to fold in: the 2.5   
+ Damper multiplier in noteToN and the velocity scale. 
