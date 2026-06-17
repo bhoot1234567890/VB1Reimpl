@@ -1,3 +1,4 @@
+#include "VB1ExcitationTables.h"
 // =============================================================================
 // VB1DSP.h — VaString digital waveguide, ported from the RE'd binary.
 // See ../VB1_RE_Spec.md and ../VB1_DSP_Reference.cpp for provenance.
@@ -19,7 +20,7 @@ constexpr int   kExcLen    = 16384;       // excitation/LFO table (0x4000)
 enum ParamID { pDamper = 0, pPickUp, pPick, pRelease, pShape, pVolume, nParams };
 
 // Runtime-tunable coefficients (fitted by tools/cma_fit.py via CMA-ES on the A/B error).
-struct Tune { double kOutGain=1.791, gScale=0.950, pickupScale=1.000, pluckScale=1.491, excAmp=0.735, relS=0.994; };  // CMA-ES-fitted (exact noise)
+struct Tune { double kOutGain=0.7795, gScale=1.0, pickupScale=1.0, pluckScale=1.0, excAmp=1.0, relS=0.997; };  // gainL=0.312×vel/127 (original +0x30 runtime-dumped)
 inline Tune g_tune;
 
 // ---- 16 factory programs (binary table @ 0x68100). Columns = host order. ----
@@ -70,16 +71,21 @@ private:
             if (! f) return false;
             return f->read (dst.data(), (ssize_t)(kExcLen * sizeof (float))) == kExcLen * (int)sizeof(float);
         };
-        // Load the ORIGINAL's exact RAW noise (dumped by vst2_render.c); GENERATE the smooth table
-        // from it via the binary's one-pole lowpass (smooth = 0.75*prev + raw*0.45 [0x39350]/[0x39488]).
-        // (The dumped "smooth" memory was wrong; generating it is correct and gives the dark/tonal pluck.)
-        if (! load ("/tmp/exc_raw.bin", raw_))
+        // RCA test: load the ORIGINAL's exact raw noise (dumped by vst2_render.c) if present,
+        // so the excitation is sample-identical. Generates smooth from it (0.75·prev + raw·0.45).
+        if (load ("/tmp/exc_raw.bin", raw_))
         {
-            juce::Random r (0x57623401);
-            for (int i = 0; i < kExcLen; ++i) raw_[i] = (float) r.nextFloat() * 2.0f - 1.0f;
+            float state = 0.0f;
+            for (int i = 0; i < kExcLen; ++i) { state = 0.75f * state + raw_[i] * 0.45f; smooth_[i] = state; }
+            return;
         }
+        juce::Random r (0x57623401);
         float state = 0.0f;
-        for (int i = 0; i < kExcLen; ++i) { state = 0.75f * state + raw_[i] * 0.45f; smooth_[i] = state; }
+        for (int i = 0; i < kExcLen; ++i)
+        {
+            float n = (float) r.nextFloat() * 2.0f - 1.0f;
+            raw_[i] = n; state = 0.75f * state + n * 0.45f; smooth_[i] = state;
+        }
     }
     std::array<float, kExcLen> raw_{};
     std::array<float, kExcLen> smooth_{};
@@ -97,6 +103,11 @@ public:
         dlA_.assign (kMaxDelay + 8, 0.0f);
         dlB_.assign (kMaxDelay + 8, 0.0f);
     }
+    // RCA: expose internal state for diffing against the original's dumped voice
+    const float* dlAData() const { return dlA_.data(); }
+    const float* dlBData() const { return dlB_.data(); }
+    void setExcitationTable (const float* table) { excTable_ = table; }
+    int getN() const { return N_; }
 
     bool canPlaySound (juce::SynthesiserSound*) override { return true; }
 
@@ -105,24 +116,31 @@ public:
     {
         const auto pr = params_;
         note_ = midiNoteNumber;
-        level_ = velocity;                       // binary scales excitation by velocity [TUNE]
+        level_ = velocity;
 
-        sustain_ = true;
-        // g (loop lowpass). Verified formula = 1-min(0.9,(9600/N)*0.0125*(0.8*Damper+0.1)) gives a
-        // too-bright attack (decimation aliasing); CMA-ES found Release*gScale measures best. [TUNE]
-        g_ = juce::jlimit (0.0, 0.999, (double) pr[pRelease] * g_tune.gScale);
+        // (1) Compute delay-line length N first — g, pickup, r8, and seeder all depend on it.
+        N_   = noteToN (midiNoteNumber, (double) pr[pDamper], getSampleRate());
+        invN_ = 1.0 / N_;
 
-        // pickup. Verified (PickUp/6+1/64)*N is correct but a too-bright attack; CMA-ES PickUp*N best. [TUNE]
-        pickup_ = juce::jlimit (0, N_ - 1, (int) (g_tune.pickupScale * (double) pr[pPickUp] * N_));
+        // (2) g = GHIDRA-VERIFIED (FUN_0001e068 @ 0x1e190):
+        //     g = 1.0 − min(0.9, (double)(float)((9600/N) × 0.0125 × (0.8×Damper + 0.1f)))
+        //     DAT_00039294 = 0.1f (float constant); gcoeff is truncated to (float) then promoted.
+        double gcoeff = (float)((9600.0 / N_) * 0.0125 * ((double) pr[pDamper] * 0.8 + 0.1f));
+        g_ = 1.0 - std::min (0.9, gcoeff);
 
-        // Pick (param 2) -> pluck position r8 = Pick*0.5*N (DECODED), split N into two segments
-        int r8 = juce::jmax (1, (int) std::trunc (g_tune.pluckScale * (double) pr[pPick] * 0.5 * N_));
+        // (3) pickup = GHIDRA-VERIFIED: (PickUp/6 + 1/64) × N
+        pickup_ = juce::jlimit (0, N_ - 1, (int) (((double) pr[pPickUp] / 6.0 + 1.0 / 64.0) * N_));
 
-        seedExcitation (r8, pr[pShape]);          // Shape: raw<->smooth blend [TUNE]
-        recomputeGains();                          // apply velocity + current volume
+        // (4) r8 (pluck split) = int(Pick × 0.5 × N), clamped ≥ 1
+        int r8 = juce::jmax (1, (int) std::trunc ((double) pr[pPick] * 0.5 * N_));
+
+        // (5) Seed excitation (makes the pluck burst), then set output gains.
+        seedExcitation (r8);                       // Shape selects raw↔smooth table
+        recomputeGains();
         filt_ = 0.0;
         idxA_ = idxB_ = 0;
         active_ = true;
+        sustain_ = true;
     }
 
     void stopNote (float, bool allowTailOff) override
@@ -182,10 +200,12 @@ private:
 
     static int noteToN (int midi, double damper, double sr)
     {
-        // binary 0x1e068: N = min( sr/freq + 1 , 9599 ); Damper slightly retunes.
-        double freq = 440.0 * std::pow (2.0, (midi - 69) / 12.0);   // [TUNE base]
-        if ((1.0 - damper) > 0.0)
-            freq *= 1.0 + (1.0 - damper - 0.5) * (1.0 / 12.0) * 0.02; // [TUNE] Damper detune
+        // binary 0x1e068: N = min( sr/freq + 1 , 9599 ).  Frequency is 12-TET with a
+        // minute Damper-driven detune (≤ 2.8 cents, only when Damper < 0.5).
+        double octave = (midi - 69) / 12.0;
+        if (damper < 0.5)
+            octave += (0.5 - damper) * (1.0 / 12.0) * (2.0 / 3.0);  // ≈ (0.5−Damper)/18
+        double freq = 2.0 * 440.0 * std::pow (2.0, octave);  // RCA: original uses 2x musical freq (N=half); was 1x -> octave low + wrong g/pickup/pluck
         int N = (int) (sr / freq + 1.0);
         return juce::jmin (N, kMaxDelay);
     }
@@ -202,26 +222,36 @@ private:
         gainR_ =        pan  * vol * level_ * kOutGain;
     }
 
-    void seedExcitation (int r8, float /*shape*/)
+    void seedExcitation (int r8)
     {
-        // [TUNE] plain triangular window (best-matching so far). Decoded *2/-0.1 + 4096/N step
-        // regressed in combination with other approx coeffs — re-isolate once release/coupling set.
-        const float* table = exc_.smooth();   // smooth (lowpass-integrated) noise table
-        const double amp = g_tune.excAmp;
+        // GHIDRA-VERIFIED (FUN_0001e068): reads excitation table at [voice+0x90]+0xf0.
+        // Phase steps by (float)(1.0/N × 4096). The table value is multiplied by the
+        // triangular window envelope, cast to float, then 2× and −0.1f (all float arithmetic).
+        // For Shape=0 the table is flat 0.5 → deterministic ramp. For Shape>0 the table
+        // contains the Shape-dependent wavetable waveform (see VB1ExcitationTables.h).
+        const float* table = excTable_;
+        if (! table) {
+            // Fallback before first program change: flat 0.5 (= original Shape=0 default)
+            for (int i = 0; i < r8; ++i)
+                dlA_[i] = dlB_[i] = (float) (2.0 * 0.5 * ((1.0/r8) * i) - 0.1);
+            for (int i = r8; i < N_; ++i)
+                dlA_[i] = dlB_[i] = (float) (2.0 * 0.5 * ((1.0/juce::jmax(1,N_-1-r8)) * (N_-1-i)) - 0.1);
+            return;
+        }
         const double rise = 1.0 / r8;
         const double fall = 1.0 / juce::jmax (1, N_ - 1 - r8);
-        const double step = invN_;     // 1/N scan — best A/B (4096/N aliases noise -> bright attack)
-        double phase = 0.0;
-        for (int i = 0; i < r8; ++i)
-        {
-            int idx = ((int) phase) & (kExcLen - 1);
-            dlA_[i] = dlB_[i] = (float) (amp * table[idx] * rise * i);
+        const float step = (float) (invN_ * 4096.0);
+        float phase = 0.0f;
+        for (int i = 0; i < r8; ++i) {
+            float tv = table[(int) phase & 0xfff];
+            float f = (float) ((double) tv * rise * (double) i);
+            dlA_[i] = dlB_[i] = (f + f) - 0.1f;
             phase += step;
         }
-        for (int i = r8; i < N_; ++i)
-        {
-            int idx = ((int) phase) & (kExcLen - 1);
-            dlA_[i] = dlB_[i] = (float) (amp * table[idx] * fall * (r8 - (i - r8)));
+        for (int i = r8; i < N_; ++i) {
+            float tv = table[(int) phase & 0xfff];
+            float f = (float) ((double) tv * fall * (double) (N_ - 1 - i));
+            dlA_[i] = dlB_[i] = (f + f) - 0.1f;
             phase += step;
         }
     }
@@ -236,6 +266,7 @@ private:
     double g_ = 0.98, filt_ = 0.0, invN_ = 0.0;
     double gainL_ = 0.0, gainR_ = 0.0;
     int    N_ = 256, pickup_ = 0, idxA_ = 0, idxB_ = 0;
+    const float* excTable_ = nullptr;  // Shape-dependent excitation table (4096 floats)
     std::vector<float> dlA_, dlB_;
 };
 
