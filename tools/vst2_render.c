@@ -105,6 +105,7 @@ int main(int argc, char** argv){
     if(!en){ fprintf(stderr,"no entry symbol\n"); return 1; }
     AEffect* e=en(hostCB);
     if(!e||e->magic!=0x56737450){ fprintf(stderr,"bad magic %x\n",e?(unsigned)e->magic:0); return 1; }
+    fprintf(stderr,"initialDelay=%d flags=0x%x numPrograms=%d\n", e->initialDelay, e->flags, e->numPrograms);
 
     dispatcher_t d=(dispatcher_t)e->dispatcher;
     fprintf(stderr,"open...\n");     d(e,effOpen,0,0,0,0);
@@ -130,6 +131,10 @@ int main(int argc, char** argv){
             __builtin_memcpy(&filt,v+0xd8,8); __builtin_memcpy(&N,v+0x100,4);
             __builtin_memcpy(&pickup,v+0x104,4);
             fprintf(stderr,"%4d %10.6f %10.6f %10d %10d %10.6f\n",prog,gainL,g,N,pickup,filt);
+            float pv[6];
+            for(int pi=0;pi<6;++pi) pv[pi]=((float(*)(void*,VstInt32))e->getParameter)(e,pi);
+            fprintf(stderr,"params %2d: %.8gf, %.8gf, %.8gf, %.8gf, %.8gf, %.8gf\n",
+                    prog, pv[0],pv[1],pv[2],pv[3],pv[4],pv[5]);
         }
         fprintf(stderr,"===\n");
         // Full dump for program 0
@@ -281,6 +286,39 @@ int main(int argc, char** argv){
                     pv[3],dec,env_rel0, dec>0?env_rel0/dec:0);
             fprintf(md,"\n");
         }
+        // ---- Release-param sweep (prog 0, note 40): dec vs Release via setParameter ----
+        fprintf(md,"## Release-param sweep (prog 0, note 40, vel 100)\n\n");
+        fprintf(md,"dec (+0xf8) measured at release sample 1; duration via 64-sample chunks (±64) capped at SR*2.\n\n");
+        fprintf(md,"| pRelease | dec (+0xf8) | 1/dec | env@rel1 | env_init=env@rel1+dec | duration (samp) | duration (s) |\n");
+        fprintf(md,"|---|---|---|---|---|---|---|\n");
+        fprintf(stderr,"=== Release sweep (prog 0) ===\n");
+        fprintf(stderr,"%8s %14s %12s %12s %12s %10s %10s\n","pRelease","dec","1/dec","env@rel1","env_init","dur","dur_s");
+        double sweep[] = {0.0, 0.05, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 0.95, 0.98, 0.99, 1.0};
+        for(int si=0; si<(int)(sizeof(sweep)/sizeof(sweep[0])); ++si){
+            double rel=sweep[si];
+            d(e,effSetProgram,0,0,0,0);
+            ((void(*)(void*,VstInt32,float))e->setParameter)(e, 3, (float)rel);
+            VstMidiEvent on; ev_set(&on,0,0x90,40,100); VstEvents eon={1,0,{&on}};
+            d(e,effProcessEvents,0,0,&eon,0);
+            de_render(e,256);
+            VstMidiEvent off; ev_set(&off,0,0x80,40,0); VstEvents eoff={1,0,{&off}};
+            d(e,effProcessEvents,0,0,&eoff,0);
+            de_render(e,1);
+            char* v=de_voice(e);
+            double dec=0, env0=0; if(v){ __builtin_memcpy(&dec,v+0xf8,8); __builtin_memcpy(&env0,v+0xf0,8); }
+            int dur=1, ended=0;
+            for(int s=0; s<SR*2; s+=64){
+                de_render(e,64); dur+=64; v=de_voice(e); if(!v){ ended=1; break; }
+                int state; __builtin_memcpy(&state,v+0xc0,4); if(state!=1){ ended=1; break; }
+            }
+            double invdec = dec>0 ? 1.0/dec : -1.0;
+            double env_init = env0 + dec;
+            fprintf(md,"| %.4f | %.10g | %.4f | %.10g | %.10g | %s%d | %.5f |\n",
+                    rel, dec, invdec, env0, env_init, ended?"":"~>", dur, (double)dur/SR);
+            fprintf(stderr,"%8.4f %14.10g %12.4f %12.10g %12.10g %10s%d %10.5f\n",
+                    rel, dec, invdec, env0, env_init, ended?"":"~>", dur, (double)dur/SR);
+        }
+        fprintf(md,"\n");
         fprintf(md,"## Cross-program summary\n\n");
         fprintf(md,"- Programs 0 and 8 share pRelease=0.9800; both yield the SAME +0xf8 decrement and SAME env init -> **the release envelope depends only on the Release param (not Shape/Pick/etc.)**.\n");
         fprintf(md,"- If confirmed linear: env(t) = env0 - dec*t, voice ends when env<=0, duration = env0/dec samples (deterministic, independent of amplitude).\n");
@@ -302,16 +340,16 @@ int main(int argc, char** argv){
         d(e,effSetProgram,0,prog,0,0);
         for(int ni=0;ni<3;++ni){
             VstMidiEvent on; ev_set(&on,0,0x90,NOTES[ni],100); VstEvents eon={1,0,{&on}};
-            block(e,&eon,1,blL,blR,zL,zR);
             for(size_t p=0;p<sustain;p+=BLOCK){
                 VstInt32 n=(VstInt32)((sustain-p<BLOCK)?sustain-p:BLOCK);
-                block(e,0,n,blL,blR,zL,zR); memcpy(gL+pos,blL,n*sizeof *blL); memcpy(gR+pos,blR,n*sizeof *blR); pos+=n;
+                block(e,(p==0)?&eon:0,n,blL,blR,zL,zR);
+                memcpy(gL+pos,blL,n*sizeof *blL); memcpy(gR+pos,blR,n*sizeof *blR); pos+=n;
             }
             VstMidiEvent off; ev_set(&off,0,0x80,NOTES[ni],0); VstEvents eoff={1,0,{&off}};
-            block(e,&eoff,1,blL,blR,zL,zR);
             for(size_t p=0;p<release;p+=BLOCK){
                 VstInt32 n=(VstInt32)((release-p<BLOCK)?release-p:BLOCK);
-                block(e,0,n,blL,blR,zL,zR); memcpy(gL+pos,blL,n*sizeof *blL); memcpy(gR+pos,blR,n*sizeof *blR); pos+=n;
+                block(e,(p==0)?&eoff:0,n,blL,blR,zL,zR);
+                memcpy(gL+pos,blL,n*sizeof *blL); memcpy(gR+pos,blR,n*sizeof *blR); pos+=n;
             }
         }
     }
