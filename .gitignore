@@ -1,4 +1,5 @@
 build/
+build_x86/
 .DS_Store
 .commandcode/
 *.zip
