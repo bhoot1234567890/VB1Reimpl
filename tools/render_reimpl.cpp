@@ -48,8 +48,25 @@ int main(int argc, char** argv)
     {
         float pv[vb1::nParams]; for (int i = 0; i < vb1::nParams; ++i) pv[i] = vb1::presets()[0].v[i];
         for (int i = 0; i < synth.getNumVoices(); ++i)
-            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i))) v->setParams (pv);
-        playNote (28, SR, SR / 2);   // E1, 1s sustain + 0.5s release — fast optimization eval
+            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i))) {
+                v->setParams (pv);
+                v->setExcitationTable (vb1::excitationTable (0));
+            }
+        midi.clear(); midi.addEvent (juce::MidiMessage::noteOn (1, 40, (juce::uint8) 100), 0); runPhase (4095);   // pure seeded (vel=100 matches original)
+        auto dumpVoice = [] (vb1::VaStringVoice* v, const char* pathA, const char* pathB) {
+            int N = v->getN();
+            FILE* fa = fopen (pathA, "wb"); fwrite (v->dlAData(), 4, N, fa); fclose (fa);
+            FILE* fb = fopen (pathB, "wb"); fwrite (v->dlBData(), 4, N, fb); fclose (fb);
+            float pk=0; for(int i=0;i<N;++i){float a=std::abs(v->dlBData()[i]); if(a>pk)pk=a;}
+            fprintf (stderr, "  dump %s: N=%d dlB peak=%.4f\n", pathB, N, pk);
+        };
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i)))
+                if (v->getN() == 264) { dumpVoice (v, "/tmp/reimpl_dlA_s1.bin", "/tmp/reimpl_dlB_s1.bin"); break; }
+        runPhase (4095);   // evolve to ~4096 total
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i)))
+                if (v->getN() == 264) { dumpVoice (v, "/tmp/reimpl_dlA.bin", "/tmp/reimpl_dlB.bin"); break; }
     }
     else
     {
@@ -58,11 +75,14 @@ int main(int argc, char** argv)
         float pv[vb1::nParams];
         for (int i = 0; i < vb1::nParams; ++i) pv[i] = vb1::presets()[prog].v[i];
         for (int i = 0; i < synth.getNumVoices(); ++i)
-            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i))) v->setParams (pv);
+            if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i))) {
+                v->setParams (pv);
+                v->setExcitationTable (vb1::excitationTable (prog));
+            }
 
         for (int ni = 0; ni < 3; ++ni)
         {
-            midi.clear(); midi.addEvent (juce::MidiMessage::noteOn (1, NOTES[ni], 0.8f), 0);
+            midi.clear(); midi.addEvent (juce::MidiMessage::noteOn (1, NOTES[ni], (juce::uint8) 100), 0);
             runPhase (sustain);
             midi.clear(); midi.addEvent (juce::MidiMessage::noteOff (1, NOTES[ni]), 0);
             runPhase (release);
