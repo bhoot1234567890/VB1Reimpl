@@ -108,6 +108,14 @@ public:
     const float* dlBData() const { return dlB_.data(); }
     void setExcitationTable (const float* table) { excTable_ = table; }
     int getN() const { return N_; }
+    // Per-sample state accessors (transient A/B analysis vs original's dumped voice).
+    double getFilt() const { return filt_; }
+    int    getIdxA() const { return idxA_; }
+    int    getIdxB() const { return idxB_; }
+    int    getPickup() const { return pickup_; }
+    double getG() const { return g_; }
+    double getGainL() const { return gainL_; }
+    double getGainR() const { return gainR_; }
 
     bool canPlaySound (juce::SynthesiserSound*) override { return true; }
 
