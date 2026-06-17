@@ -73,7 +73,7 @@ static void wav_write(const char* p, sample_t* L, sample_t* R, size_t n, int sr)
 int main(int argc, char** argv){
     setvbuf(stderr, NULL, _IONBF, 0);
     if(argc<3){ fprintf(stderr,"usage: %s <binary> <out.wav> [mains]\n",argv[0]); return 1; }
-    int doMains = (argc>3);
+    int doMains = 0; for(int a=2;a<argc;++a) if(strstr(argv[a],"mains")) doMains=1;
     const int SR=44100, BLOCK=256, NOTES[3]={28,40,52};
     void* h=dlopen(argv[1], RTLD_NOW|RTLD_LOCAL);
     if(!h){ fprintf(stderr,"dlopen: %s\n", dlerror()); return 1; }
@@ -88,6 +88,71 @@ int main(int argc, char** argv){
     fprintf(stderr,"setSR...\n");    d(e,effSetSampleRate,0,0,0,(float)SR);
     fprintf(stderr,"setBlock...\n"); d(e,effSetBlockSize,0,BLOCK,0,0);
     if(doMains){ fprintf(stderr,"mainsOn...\n"); d(e,effMainsChanged,0,1,0,0); fprintf(stderr,"mainsOn done\n"); }
+    // ---- RCA Stage 0.2: dump the original's seeded delay-line state ----
+    for (int a=2;a<argc;++a) if (strstr(argv[a],"dumpvoices")) {
+        // Scan all 16 programs: print gainL(+0x30), g(+0xd0), N(+0x100), pickup(+0x104) per program
+        fprintf(stderr,"=== Per-program voice scan (note 40, velocity 100) ===\n");
+        fprintf(stderr,"%4s %10s %10s %10s %10s %10s\n","prog","gainL","g","N","pickup","filt");
+        for (int prog=0; prog<16; ++prog) {
+            d(e,effSetProgram,0,prog,0,0);
+            VstMidiEvent on; ev_set(&on,0,0x90,40,100); VstEvents eon={1,0,{&on}};
+            d(e,effProcessEvents,0,0,&eon,0);
+            { sample_t bl[64], z[64]; memset(z,0,sizeof z); sample_t*o[2]={bl,bl},*in[2]={z,z};
+              e->processReplacing(e,in,o,4096); }  // 1 sample to trigger note-on gain computation
+            char* vastring=(char*)e->object; if(!vastring) continue;
+            char* voices=*(char**)(vastring+0x40f8); if(!voices) continue;
+            char* v=*(char**)(voices+0x2b8); if(!v) continue;
+            double gainL,g,filt; int N,pickup;
+            __builtin_memcpy(&gainL,v+0x30,8); __builtin_memcpy(&g,v+0xd0,8);
+            __builtin_memcpy(&filt,v+0xd8,8); __builtin_memcpy(&N,v+0x100,4);
+            __builtin_memcpy(&pickup,v+0x104,4);
+            fprintf(stderr,"%4d %10.6f %10.6f %10d %10d %10.6f\n",prog,gainL,g,N,pickup,filt);
+        }
+        fprintf(stderr,"===\n");
+        // Full dump for program 0
+        d(e,effSetProgram,0,0,0,0);
+        VstMidiEvent on; ev_set(&on,0,0x90,40,100); VstEvents eon={1,0,{&on}};
+        d(e,effProcessEvents,0,0,&eon,0);          // note-on
+        { sample_t bl[4096], z[4096]; memset(z,0,sizeof z); sample_t*o[2]={bl,bl},*in[2]={z,z};
+          e->processReplacing(e,in,o,4096); }      // 4096 samples -> fully evolved state
+        char* vastring=(char*)e->object; if(!vastring){fprintf(stderr,"no obj\n");return 1;}
+        char* voices=*(char**)(vastring+0x40f8);    if(!voices){fprintf(stderr,"no voices\n");return 1;}
+        char* v=*(char**)(voices+0x2b8);
+        int N; __builtin_memcpy(&N,v+0x100,4);
+        float *dlA,*dlB; __builtin_memcpy(&dlA,v+0x110,8); __builtin_memcpy(&dlB,v+0x118,8);
+        FILE* fr=fopen("/tmp/voice_raw.bin","wb"); fwrite(v,1,0x128,fr); fclose(fr);
+        FILE* fa=fopen("/tmp/voice_dlA.bin","wb"); fwrite(dlA,4,N,fa); fclose(fa);
+        FILE* fb=fopen("/tmp/voice_dlB.bin","wb"); fwrite(dlB,4,N,fb); fclose(fb);
+        // ===== Shape investigation: seeded dumps (processReplacing=1) for {0,5,6,8,15} =====
+        // Captures excitation table (4096 floats @ [voice+0x90]+0xf0), seeded dlA/dlB,
+        // and full voice struct (0x140 bytes) immediately after note-on, before evolution.
+        {
+            fprintf(stderr,"=== Seeded dumps for ALL 16 programs ===\n");
+            for (int prog=0; prog<16; ++prog) {
+                d(e,effSetProgram,0,prog,0,0);
+                VstMidiEvent son; ev_set(&son,0,0x90,40,100); VstEvents seon={1,0,{&son}};
+                d(e,effProcessEvents,0,0,&seon,0);
+                { sample_t sbl[64], sz[64]; memset(sz,0,sizeof sz);
+                  sample_t* so[2]={sbl,sbl},* sin[2]={sz,sz};
+                  e->processReplacing(e,sin,so,1); }   // 1 sample: capture table before evolution
+                char* sobj=(char*)e->object; if(!sobj){fprintf(stderr,"prog %d: no obj\n",prog);continue;}
+                char* svoc=*(char**)(sobj+0x40f8); if(!svoc){fprintf(stderr,"prog %d: no voices\n",prog);continue;}
+                char* sv=*(char**)(svoc+0x2b8); if(!sv){fprintf(stderr,"prog %d: no voice\n",prog);continue;}
+                char* sdata=*(char**)(sv+0x90); if(!sdata){fprintf(stderr,"prog %d: no data\n",prog);continue;}
+                float* stable=(float*)(sdata+0xf0);
+                char path[128];
+                snprintf(path,sizeof path,"/tmp/table_prog%d.bin",prog);
+                FILE* stf=fopen(path,"wb"); if(!stf){perror(path);continue;} fwrite(stable,4,4096,stf); fclose(stf);
+                int tuniq=1; for(int i=1;i<4096;++i){ if(stable[i]!=stable[0]){tuniq=0;break;} }
+                double tmin=1e30,tmax=-1e30;
+                for(int i=0;i<4096;++i){double x=stable[i]; if(x<tmin)tmin=x; if(x>tmax)tmax=x;}
+                fprintf(stderr,"prog %2d: table all_equal=%d first=%.4f min=%.4f max=%.4f\n",
+                        prog,tuniq,stable[0],tmin,tmax);
+            }
+            fprintf(stderr,"===\n");
+        }
+        d(e,effClose,0,0,0,0); return 0;
+    }
 
     const size_t sustain=SR/2, release=SR/4, step=sustain+release;
     const size_t total=16*3*step + SR;
