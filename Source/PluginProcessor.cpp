@@ -32,6 +32,9 @@ VaStringReimplAudioProcessor::VaStringReimplAudioProcessor()
     for (int i = 0; i < vb1::kNumVoices; ++i)
         synth.addVoice (new vb1::VaStringVoice (excitation));
     synth.addSound (new vb1::VaStringSound());
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i)))
+            v->setExcitationTable (vb1::excitationTable (0));
 
     for (const auto id : { "damper", "pickup", "pick", "release", "shape", "volume" })
         apvts.addParameterListener (id, this);
@@ -81,6 +84,9 @@ void VaStringReimplAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 void VaStringReimplAudioProcessor::setCurrentProgram (int idx)
 {
     currentProgram_ = juce::jlimit (0, getNumPrograms() - 1, idx);
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* v = dynamic_cast<vb1::VaStringVoice*> (synth.getVoice (i)))
+            v->setExcitationTable (vb1::excitationTable (currentProgram_));
     const auto& pr = vb1::presets()[currentProgram_];
     const juce::StringArray ids { "damper", "pickup", "pick", "release", "shape", "volume" };
     for (int i = 0; i < vb1::nParams; ++i)

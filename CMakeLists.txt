@@ -36,7 +36,8 @@ target_include_directories(VB1Reimpl PRIVATE Source)
 
 target_compile_definitions(VB1Reimpl PUBLIC
     JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0)
+    JUCE_USE_CURL=0
+    JUCE_DEPRECATION_WARNINGS=0)
 
 target_link_libraries(VB1Reimpl
     PRIVATE
