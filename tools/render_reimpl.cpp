@@ -9,8 +9,9 @@
 int main(int argc, char** argv)
 {
     const char* out = argc > 1 ? argv[1] : "/tmp/reimpl.wav";
-    bool shortMode = false;
+    bool shortMode = false, persampleMode = false;
     for (int a = 2; a < argc; ++a) { if (juce::String (argv[a]) == "short") shortMode = true;
+        else if (juce::String (argv[a]) == "persample") persampleMode = true;
         else { // coeffs file: 6 floats -> g_tune
             auto ts = juce::File (argv[a]).loadFileAsString(); auto t = juce::StringArray::fromTokens (ts, true);
             double c[6] = {1.3,1.0,1.0,1.0,1.0,0.997};
@@ -21,6 +22,45 @@ int main(int argc, char** argv)
     const int SR = 44100;
     const int sustain = SR / 2, release = SR / 4;
     const int NOTES[3] = { 28, 40, 52 };
+    if (persampleMode)
+    {
+        // Program 0, note 40, velocity 100, SUSTAIN ONLY (no release). Renders one sample at a
+        // time through a single VaStringVoice (bypassing the synth for direct state access) and
+        // dumps per-sample voice state to /tmp/reimpl_persample.bin for byte-comparison against
+        // the original. Binary layout: int32 N, int32 nsamp, then per sample:
+        //   float out | double filt | int32 idxA | int32 idxB | int32 pickup |
+        //   double g | double gainL | double gainR | float dlA[N] | float dlB[N]
+        using namespace vb1;
+        Excitation excPs;
+        VaStringVoice voice (excPs);
+        voice.setSampleRate ((double) SR);
+        float pv[nParams]; for (int i = 0; i < nParams; ++i) pv[i] = presets()[0].v[i];
+        voice.setParams (pv);
+        voice.setExcitationTable (excitationTable (0));
+        const float vel = juce::MidiMessage::noteOn (1, 40, (juce::uint8) 100).getFloatVelocity();
+        voice.startNote (40, vel, nullptr, 0);
+        const int NSAMP = 64, N = voice.getN();
+        FILE* f = fopen ("/tmp/reimpl_persample.bin", "wb");
+        int32_t hdr[2] = { N, NSAMP }; fwrite (hdr, 4, 2, f);
+        juce::AudioBuffer<float> b1 (2, 1);
+        for (int s = 0; s < NSAMP; ++s)
+        {
+            b1.clear(); voice.renderNextBlock (b1, 0, 1);
+            float o = b1.getReadPointer (0)[0];
+            double flt = voice.getFilt(); double g = voice.getG();
+            double gL = voice.getGainL(), gR = voice.getGainR();
+            int32_t a = voice.getIdxA(), bb = voice.getIdxB(), pk = voice.getPickup();
+            fwrite (&o, 4, 1, f); fwrite (&flt, 8, 1, f);
+            fwrite (&a, 4, 1, f); fwrite (&bb, 4, 1, f); fwrite (&pk, 4, 1, f);
+            fwrite (&g, 8, 1, f); fwrite (&gL, 8, 1, f); fwrite (&gR, 8, 1, f);
+            fwrite (voice.dlAData(), 4, N, f); fwrite (voice.dlBData(), 4, N, f);
+            fprintf (stderr, "s=%2d out=%+.6e filt=%+.6e idxA=%d idxB=%d\n", s, o, flt, a, bb);
+        }
+        fclose (f);
+        fprintf (stderr, "wrote /tmp/reimpl_persample.bin (N=%d nsamp=%d vel=%.7f gainL=%.7f g=%.7f pickup=%d)\n",
+                 N, NSAMP, vel, voice.getGainL(), voice.getG(), voice.getPickup());
+        return 0;
+    }
 
     vb1::Excitation exc;
     juce::Synthesiser synth;
