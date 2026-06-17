@@ -29,22 +29,22 @@ struct Preset { const char* name; float v[nParams]; };
 inline const std::array<Preset, 16>& presets()
 {
     static const std::array<Preset, 16> p{{ // Damper, PickUp, Pick, Release, Shape, Volume
-        { "Bassic Bass",  { 0.100f, 0.750f, 0.333f, 0.980f, 0.000f, 0.800f } },
-        { "Sustain Bass", { 0.602f, 0.913f, 0.540f, 0.980f, 0.000f, 0.800f } },
-        { "Round Bass",   { 0.352f, 0.957f, 1.000f, 0.980f, 0.000f, 0.800f } },
-        { "Fretless",     { 1.000f, 0.000f, 1.000f, 0.980f, 0.000f, 0.800f } },
-        { "Synthi Bass",  { 0.114f, 0.290f, 0.000f, 0.980f, 0.000f, 0.800f } },
-        { "Clavinet",     { 0.625f, 0.304f, 0.000f, 0.980f, 1.000f, 0.800f } },
-        { "DX Bass",      { 0.636f, 0.522f, 0.405f, 0.980f, 0.798f, 0.800f } },
-        { "Hollow Bass",  { 0.716f, 0.391f, 0.349f, 0.980f, 0.244f, 0.800f } },
-        { "Sequenz Bass", { 0.136f, 0.000f, 1.000f, 0.980f, 0.229f, 0.800f } },
-        { "Warm Bass",    { 0.807f, 0.000f, 0.405f, 0.980f, 0.161f, 0.800f } },
-        { "Slap Frets",   { 0.239f, 0.000f, 0.000f, 0.980f, 1.000f, 0.800f } },
-        { "Buzz Bass",    { 1.000f, 0.551f, 0.209f, 0.980f, 0.419f, 0.800f } },
-        { "Add Chorus",   { 0.670f, 0.000f, 0.451f, 0.980f, 0.833f, 0.800f } },
-        { "Synth Bass 2", { 1.000f, 0.304f, 1.000f, 0.980f, 0.387f, 0.800f } },
-        { "Dark Click",   { 0.886f, 0.188f, 0.386f, 0.980f, 0.119f, 0.800f } },
-        { "Synth Bass 3", { 0.148f, 1.000f, 0.000f, 0.980f, 0.678f, 0.800f } },
+        { "Bassic Bass",  { 0.1f, 0.75f, 0.33329999f, 0.98000002f, 0.0f, 0.80000001f } },
+        { "Sustain Bass", { 0.60227299f, 0.91304302f, 0.53953499f, 0.98000002f, 0.0f, 0.80000001f } },
+        { "Round Bass",   { 0.35227299f, 0.95652199f, 1.0f, 0.98000002f, 0.0f, 0.80000001f } },
+        { "Fretless",     { 1.0f, 0.0f, 1.0f, 0.98000002f, 0.0f, 0.80000001f } },
+        { "Synthi Bass",  { 0.113636f, 0.289855f, 0.0f, 0.98000002f, 0.0f, 0.80000001f } },
+        { "Clavinet",     { 0.625f, 0.30434799f, 0.0f, 0.98000002f, 1.0f, 0.80000001f } },
+        { "DX Bass",      { 0.63636398f, 0.52173901f, 0.40465099f, 0.98000002f, 0.79828799f, 0.80000001f } },
+        { "Hollow Bass",  { 0.715909f, 0.39130399f, 0.34883699f, 0.98000002f, 0.24428099f, 0.80000001f } },
+        { "Sequenz Bass", { 0.136364f, 0.0f, 1.0f, 0.98000002f, 0.228516f, 0.80000001f } },
+        { "Warm Bass",    { 0.80681801f, 0.0f, 0.40465099f, 0.98000002f, 0.160605f, 0.80000001f } },
+        { "Slap Frets",   { 0.238636f, 0.0f, 0.0f, 0.98000002f, 1.0f, 0.80000001f } },
+        { "Buzz Bass",    { 1.0f, 0.55072498f, 0.20930199f, 0.98000002f, 0.419047f, 0.80000001f } },
+        { "Add Chorus",   { 0.67045498f, 0.0f, 0.45116299f, 0.98000002f, 0.83333302f, 0.80000001f } },
+        { "Synth Bass 2", { 1.0f, 0.30434799f, 1.0f, 0.98000002f, 0.387485f, 0.80000001f } },
+        { "Dark Click",   { 0.88636398f, 0.18840601f, 0.38604599f, 0.98000002f, 0.118538f, 0.80000001f } },
+        { "Synth Bass 3", { 0.147727f, 1.0f, 0.0f, 0.98000002f, 0.67822999f, 0.80000001f } },
     }};
     return p;
 }
@@ -154,7 +154,16 @@ public:
     void stopNote (float, bool allowTailOff) override
     {
         if (! allowTailOff) { active_ = false; clearCurrentNote(); }
-        else                sustain_ = false;   // -> release loop [0x1de62]
+        else {
+            // GHIDRA-VERIFIED (FUN_0001e630 @ 0x1e630): at note-off, g switches to the Release
+            // param, and a LINEAR envelope starts at 1.0 with per-sample decrement.
+            sustain_ = false;
+            g_ = (double) params_[pRelease];
+            int releaseSamples = (int) (sampleRate_ * 2.5 * (1.0 - (double) params_[pRelease]));
+            releaseSamples = juce::jmax (256, releaseSamples);
+            releaseEnv_ = 1.0;
+            releaseDec_ = 1.0 / (double) releaseSamples;
+        }
     }
 
     void controllerMoved (int, int) override {}
@@ -170,14 +179,13 @@ public:
         const double g  = g_;
         const double om = 1.0 - g;
         const int    pk = pickup_;
-        const double relS = g_tune.relS;       // [TUNE] per-SAMPLE release decay (CMA-ES-fitted)
         for (int s = 0; s < n; ++s)
         {
             // (1) pickup read at offset -> comb filtering
             int pi = idxB_ + pk;  if (pi >= N) pi -= N;
             double pick = dlB_[pi];
 
-            // (2) loop lowpass (Release->g) + inverting termination
+            // (2) loop lowpass (g from Damper in sustain, Release param in release)
             filt_ = g * filt_ + om * (double) dlB_[idxB_];
             dlA_[idxA_] = -(float) filt_;
 
@@ -188,11 +196,14 @@ public:
             if (--idxA_ < 0) idxA_ += N;
             if (++idxB_ >= N) idxB_ -= N;
 
-            // (4) output (additive across voices); avoid double-add when mono (R==L)
-            L[start + s] += (float) (pick * gainL_);
-            if (R != L) R[start + s] += (float) (pick * gainR_);
-            // release: decay per sample; cut voice when inaudible
-            if (! sustain_) { gainL_ *= relS; gainR_ *= relS; if (gainL_ < 1e-5 && gainR_ < 1e-5) { active_ = false; clearCurrentNote(); return; } }
+            // (4) output: sustain = pick × gainL; release = pick × env × gainL
+            double env = sustain_ ? 1.0 : releaseEnv_;
+            L[start + s] += (float) (pick * env * gainL_);
+            if (R != L) R[start + s] += (float) (pick * env * gainR_);
+            if (! sustain_) {
+                releaseEnv_ -= releaseDec_;
+                if (releaseEnv_ <= 0.0) { active_ = false; clearCurrentNote(); return; }
+            }
         }
     }
     // Called by the processor whenever a param changes (and on program change).
@@ -273,6 +284,7 @@ private:
 
     double g_ = 0.98, filt_ = 0.0, invN_ = 0.0;
     double gainL_ = 0.0, gainR_ = 0.0;
+    double releaseEnv_ = 0.0, releaseDec_ = 0.0;  // linear release envelope (FUN_0001e630)
     int    N_ = 256, pickup_ = 0, idxA_ = 0, idxB_ = 0;
     const float* excTable_ = nullptr;  // Shape-dependent excitation table (4096 floats)
     std::vector<float> dlA_, dlB_;
