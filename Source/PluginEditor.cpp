@@ -1,62 +1,184 @@
 // =============================================================================
-// PluginEditor.cpp
+// PluginEditor.cpp — Custom dark/amber UI for VB-1 reimpl
 // =============================================================================
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+// ─── Constructor ─────────────────────────────────────────────────────────────
+
 VaStringReimplAudioProcessorEditor::VaStringReimplAudioProcessorEditor (VaStringReimplAudioProcessor& p)
-    : juce::AudioProcessorEditor (&p), proc (p)
+    : juce::AudioProcessorEditor (&p), proc (p),
+      keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
 {
     static const char* names[6] = { "Damper", "PickUp", "Pick", "Release", "Shape", "Volume" };
-    static const char* ids[6]   = { "damper", "pickup", "pick", "release", "shape", "volume" };
+    static const char* ids  [6] = { "damper", "pickup", "pick", "release", "shape", "volume" };
 
     for (int i = 0; i < 6; ++i)
     {
         knobs[i].slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        knobs[i].slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 18);
-        knobs[i].label.setText (names[i], juce::dontSendNotification);
-        knobs[i].label.setJustificationType (juce::Justification::centred);
+        knobs[i].slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 18);
+        knobs[i].slider.setNumDecimalPlacesToDisplay (2);
+        knobs[i].slider.setLookAndFeel (&lnf);
+        knobs[i].slider.setColour (juce::Slider::textBoxTextColourId, juce::Colour (0xFFC8C8CE));
+        knobs[i].slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        knobs[i].slider.setColour (juce::Slider::textBoxHighlightColourId,
+                                   juce::Colour (0xFFE8A547).withAlpha (0.25f));
         knobs[i].attach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>
                               (proc.getAPVTS(), ids[i], knobs[i].slider);
+
+        knobs[i].label.setText (names[i], juce::dontSendNotification);
+        knobs[i].label.setJustificationType (juce::Justification::centred);
+        knobs[i].label.setLookAndFeel (&lnf);
+        knobs[i].label.setFont (juce::Font (juce::FontOptions (12.0f)));
+
         addAndMakeVisible (knobs[i].slider);
         addAndMakeVisible (knobs[i].label);
     }
 
-    // Programs are not an APVTS param — drive them via setCurrentProgram().
-    programBox.addItemList ([&]
-    {
-        juce::StringArray items;
-        for (const auto& pr : vb1::presets()) items.add (pr.name);
-        return items;
-    }(), 1);
+    programLabel.setText ("PROGRAM", juce::dontSendNotification);
+    programLabel.setJustificationType (juce::Justification::centredLeft);
+    programLabel.setLookAndFeel (&lnf);
+    programLabel.setFont (juce::Font (juce::FontOptions (9.0f)));
+    programLabel.setColour (juce::Label::textColourId, juce::Colour (0xFF6A6A72));
+    addAndMakeVisible (programLabel);
+
+    juce::StringArray items;
+    for (const auto& pr : vb1::presets()) items.add (pr.name);
+    programBox.addItemList (items, 1);
     programBox.setSelectedItemIndex (proc.getCurrentProgram(), juce::dontSendNotification);
-    programBox.onChange = [this]
-    {
-        proc.setCurrentProgram (programBox.getSelectedItemIndex());
-    };
+    programBox.setLookAndFeel (&lnf);
+    programBox.onChange = [this] { proc.setCurrentProgram (programBox.getSelectedItemIndex()); };
     addAndMakeVisible (programBox);
 
-    setSize (520, 220);
+    // On-screen keyboard (clickable piano at bottom — also responds to computer QWERTY)
+    keyboard.setOctaveForMiddleC (4);
+    keyboard.setLowestVisibleKey (0x30);   // C2
+    keyboard.setKeyWidth (26.0f);
+    keyboard.setWantsKeyboardFocus (true);
+    setWantsKeyboardFocus (true);
+    // Map QWERTY keys to notes (bottom row = white keys, top row = black keys)
+    using KP = juce::KeyPress;
+    keyboard.setKeyPressForNote (KP ('z'), 0);   keyboard.setKeyPressForNote (KP ('s'), 1);
+    keyboard.setKeyPressForNote (KP ('x'), 2);   keyboard.setKeyPressForNote (KP ('d'), 3);
+    keyboard.setKeyPressForNote (KP ('c'), 4);
+    keyboard.setKeyPressForNote (KP ('v'), 5);   keyboard.setKeyPressForNote (KP ('g'), 6);
+    keyboard.setKeyPressForNote (KP ('b'), 7);   keyboard.setKeyPressForNote (KP ('h'), 8);
+    keyboard.setKeyPressForNote (KP ('n'), 9);   keyboard.setKeyPressForNote (KP ('j'), 10);
+    keyboard.setKeyPressForNote (KP ('m'), 11);
+    keyboard.setKeyPressForNote (KP ('q'), 12);  keyboard.setKeyPressForNote (KP ('2'), 13);
+    keyboard.setKeyPressForNote (KP ('w'), 14);  keyboard.setKeyPressForNote (KP ('3'), 15);
+    keyboard.setKeyPressForNote (KP ('e'), 16);
+    keyboard.setKeyPressForNote (KP ('r'), 17);  keyboard.setKeyPressForNote (KP ('5'), 18);
+    keyboard.setKeyPressForNote (KP ('t'), 19);  keyboard.setKeyPressForNote (KP ('6'), 20);
+    keyboard.setKeyPressForNote (KP ('y'), 21);  keyboard.setKeyPressForNote (KP ('7'), 22);
+    keyboard.setKeyPressForNote (KP ('u'), 23);
+    keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId,    juce::Colour (0xFF2A2A30));
+    keyboard.setColour (juce::MidiKeyboardComponent::blackNoteColourId,    juce::Colour (0xFF15151A));
+    keyboard.setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour (0xFF38383E));
+    keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, juce::Colour (0xFFE8A547).withAlpha (0.25f));
+    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId,      juce::Colour (0xFFE8A547).withAlpha (0.45f));
+    addAndMakeVisible (keyboard);
+
+    setSize (560, 360);
 }
 
-void VaStringReimplAudioProcessorEditor::layoutKnob (juce::Slider& s, juce::Label& l, int x)
+VaStringReimplAudioProcessorEditor::~VaStringReimplAudioProcessorEditor()
 {
-    l .setBounds (x,        70, 80, 18);
-    s .setBounds (x + 10,   18, 60, 60);
+    for (int i = 0; i < 6; ++i)
+    {
+        knobs[i].slider.setLookAndFeel (nullptr);
+        knobs[i].label.setLookAndFeel (nullptr);
+    }
+    programBox.setLookAndFeel (nullptr);
+    programLabel.setLookAndFeel (nullptr);
 }
+
+// ─── Layout ─────────────────────────────────────────────────────────────────
 
 void VaStringReimplAudioProcessorEditor::resized()
 {
-    programBox.setBounds (12, 12, 200, 22);
+    // Program selector (top-right)
+    programLabel.setBounds (getWidth() - 240, 6, 80, 12);
+    programBox  .setBounds (getWidth() - 240, 18, 230, 22);
+
+    // Knob grid: 3 groups of 2 — [Damper Shape] [PickUp Pick] [Release Volume]
+    const int ks = 72;   // knob size
+    const int kg = 14;   // gap between knobs within a group
+    const int gg = 36;   // gap between groups
+    const int tw = 6 * ks + 4 * kg + 2 * gg;  // total width
+
+    int startX = juce::jmax (12, (getWidth() - tw) / 2);
+    int startY = 60;
+
     for (int i = 0; i < 6; ++i)
-        layoutKnob (knobs[i].slider, knobs[i].label, 12 + i * 84);
+    {
+        int group = i / 2;   // 0, 0, 1, 1, 2, 2
+        int slot  = i % 2;   // 0, 1, 0, 1, 0, 1
+
+        int x = startX + group * (2 * ks + kg + gg) + slot * (ks + kg);
+        knobs[i].slider.setBounds (x, startY, ks, ks);
+        knobs[i].label.setBounds  (x - 4, startY + ks + 4, ks + 8, 16);
+    }
+
+    keyboard.setBounds (12, getHeight() - 92, getWidth() - 24, 80);
 }
+
+// ─── Paint ───────────────────────────────────────────────────────────────────
 
 void VaStringReimplAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff14161c));
-    g.setColour (juce::Colours::white);
-    g.setFont (15.0f);
-    g.drawText ("VB-1 (reimpl)", getLocalBounds().removeFromTop (16),
-                juce::Justification::centred, true);
+    auto bounds = getLocalBounds().toFloat();
+
+    // Background gradient
+    juce::ColourGradient bg (
+        juce::Colour (0xFF1E1E24), bounds.getX(), bounds.getY(),
+        juce::Colour (0xFF0E0E12), bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill (bg);
+    g.fillAll();
+
+    // Glass-edge sheen
+    juce::ColourGradient sheen (
+        juce::Colours::white.withAlpha (0.025f), bounds.getX(), bounds.getY(),
+        juce::Colours::transparentWhite, bounds.getX(), bounds.getY() + 50, false);
+    g.setGradientFill (sheen);
+    g.fillRect (bounds.withHeight (50));
+
+    // Outer border
+    g.setColour (juce::Colour (0xFF303036));
+    g.drawRect (bounds, 1.0f);
+
+    // Title
+    g.setColour (juce::Colour (0xFFE8A547));
+    g.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    g.drawText ("VB-1", 14, 10, 56, 20, juce::Justification::centredLeft);
+
+    g.setColour (juce::Colour (0xFF6A6A72));
+    g.setFont (juce::Font (juce::FontOptions (9.0f)));
+    g.drawText ("reimpl", 14, 27, 56, 12, juce::Justification::centredLeft);
+
+    // Section labels + dividers (positions must match resized())
+    const int ks = 72, kg = 14, gg = 36;
+    const int tw = 6 * ks + 4 * kg + 2 * gg;
+    int startX = juce::jmax (12, (getWidth() - tw) / 2);
+    int labelY = 60 + ks + 24;
+
+    const char* sections[] = { "TONE", "GEOMETRY", "ENVELOPE" };
+
+    for (int grp = 0; grp < 3; ++grp)
+    {
+        int groupStart = startX + grp * (2 * ks + kg + gg);
+        int groupWidth = 2 * ks + kg;
+
+        g.setColour (juce::Colour (0xFF48484E));
+        g.setFont (juce::Font (juce::FontOptions (8.5f)));
+        g.drawText (sections[grp], groupStart, labelY,
+                    groupWidth, 12, juce::Justification::centred);
+
+        if (grp < 2)
+        {
+            int sepX = groupStart + groupWidth + gg / 2;
+            g.setColour (juce::Colour (0xFF28282E));
+            g.drawLine ((float) sepX, 66.0f, (float) sepX, (float) (60 + ks + 4), 1.0f);
+        }
+    }
 }

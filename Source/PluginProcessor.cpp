@@ -78,6 +78,7 @@ void VaStringReimplAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 {
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
+    keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
     synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
 }
 

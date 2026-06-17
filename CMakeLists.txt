@@ -11,7 +11,7 @@ endif()
 if(NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
         "Set JUCE_DIR to a JUCE checkout, e.g.:\n"
-        "  git clone --depth 1 --branch 7.0.5 https://github.com/juce-framework/JUCE\n"
+        "  git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE\n"
         "  cmake -B build -DJUCE_DIR=/path/to/JUCE")
 endif()
 add_subdirectory("${JUCE_DIR}" JUCE EXCLUDE_FROM_ALL)
@@ -20,7 +20,7 @@ juce_add_plugin(VB1Reimpl
     COMPANY_NAME           "Personal"
     PLUGIN_MANUFACTURER_CODE Vb1r
     PLUGIN_CODE            Vb1x
-    FORMATS                VST3 AU          # add Standalone if desired
+    FORMATS                VST3 AU Standalone  # Standalone = double-click app, no DAW needed
     PRODUCT_NAME           "VB-1 reimpl"
     IS_SYNTH               TRUE
     NEEDS_MIDI_INPUT       TRUE

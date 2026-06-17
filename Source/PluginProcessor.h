@@ -38,6 +38,7 @@ public:
     void setStateInformation (const void*, int) override;
 
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
+    juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout makeLayout();
@@ -47,6 +48,7 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     vb1::Excitation excitation;
     juce::Synthesiser synth;
+    juce::MidiKeyboardState keyboardState;  // for standalone virtual keyboard
     int currentProgram_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VaStringReimplAudioProcessor)

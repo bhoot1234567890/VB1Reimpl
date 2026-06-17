@@ -9,3 +9,6 @@ build_x86/
 *.swo
 *~
 JUCE/
+build_uni/
+build_host/
+*.wav
