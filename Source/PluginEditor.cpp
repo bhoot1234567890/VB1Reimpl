@@ -165,40 +165,59 @@ bool VaStringReimplAudioProcessorEditor::keyStateChanged (bool)
 void VaStringReimplAudioProcessorEditor::paint (juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
+    auto w = bounds.getWidth();
+    auto h = bounds.getHeight();
 
-    // Background gradient
+    // ─── Background: multi-stop gradient ─────────────────────────────────
     juce::ColourGradient bg (
-        juce::Colour (0xFF1E1E24), bounds.getX(), bounds.getY(),
-        juce::Colour (0xFF0E0E12), bounds.getX(), bounds.getBottom(), false);
+        juce::Colour (0xFF202028), 0, 0,
+        juce::Colour (0xFF0A0A0E), 0, h, false);
+    bg.addColour (0.3, juce::Colour (0xFF181820));
+    bg.addColour (0.7, juce::Colour (0xFF0F0F14));
     g.setGradientFill (bg);
     g.fillAll();
 
-    // Glass-edge sheen
+    // ─── Top glow bar (amber accent line) ──────────────────────────────────
+    juce::ColourGradient glow (
+        juce::Colour (0xFFE8A547).withAlpha (0.25f), 0, 0,
+        juce::Colour (0xFFE8A547).withAlpha (0.0f),  0, 4, false);
+    g.setGradientFill (glow);
+    g.fillRect (juce::Rectangle<float> (0, 0, w, 4));
+
+    // ─── Glass-edge sheen ──────────────────────────────────────────────────
     juce::ColourGradient sheen (
-        juce::Colours::white.withAlpha (0.025f), bounds.getX(), bounds.getY(),
-        juce::Colours::transparentWhite, bounds.getX(), bounds.getY() + 50, false);
+        juce::Colours::white.withAlpha (0.03f), 0, 0,
+        juce::Colours::transparentWhite, 0, 45, false);
     g.setGradientFill (sheen);
-    g.fillRect (bounds.withHeight (50));
+    g.fillRect (juce::Rectangle<float> (0, 0, w, 45));
 
-    // Outer border
-    g.setColour (juce::Colour (0xFF303036));
-    g.drawRect (bounds, 1.0f);
+    // ─── Vignette (darker corners) ─────────────────────────────────────────
+    juce::ColourGradient vig (
+        juce::Colours::transparentBlack, w * 0.3f, h * 0.3f,
+        juce::Colours::black.withAlpha (0.25f), 0, 0, true);
+    g.setGradientFill (vig);
+    g.fillAll();
 
-    // Title
+    // ─── Outer border ──────────────────────────────────────────────────────
+    g.setColour (juce::Colour (0xFF383840));
+    g.drawRect (bounds.reduced (0.5f), 1.0f);
+
+    // ─── Title with glow ───────────────────────────────────────────────────
+    g.setColour (juce::Colour (0xFFE8A547).withAlpha (0.15f));
+    g.setFont (juce::Font (juce::FontOptions (17.0f, juce::Font::bold)));
+    g.drawText ("VB-1", 15, 9, 56, 20, juce::Justification::centredLeft);
     g.setColour (juce::Colour (0xFFE8A547));
-    g.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
-    g.drawText ("VB-1", 14, 10, 56, 20, juce::Justification::centredLeft);
+    g.drawText ("VB-1", 14, 8, 56, 20, juce::Justification::centredLeft);
 
-    g.setColour (juce::Colour (0xFF6A6A72));
+    g.setColour (juce::Colour (0xFF5A5A62));
     g.setFont (juce::Font (juce::FontOptions (9.0f)));
     g.drawText ("reimpl", 14, 27, 56, 12, juce::Justification::centredLeft);
 
-    // Section labels + dividers (positions must match resized())
+    // ─── Section labels + dividers ─────────────────────────────────────────
     const int ks = 72, kg = 14, gg = 36;
     const int tw = 6 * ks + 4 * kg + 2 * gg;
     int startX = juce::jmax (12, (getWidth() - tw) / 2);
     int labelY = 60 + ks + 24;
-
     const char* sections[] = { "TONE", "GEOMETRY", "ENVELOPE" };
 
     for (int grp = 0; grp < 3; ++grp)
@@ -208,14 +227,19 @@ void VaStringReimplAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (juce::Colour (0xFF48484E));
         g.setFont (juce::Font (juce::FontOptions (8.5f)));
-        g.drawText (sections[grp], groupStart, labelY,
-                    groupWidth, 12, juce::Justification::centred);
+        g.drawText (sections[grp], groupStart, labelY, groupWidth, 12, juce::Justification::centred);
 
         if (grp < 2)
         {
             int sepX = groupStart + groupWidth + gg / 2;
-            g.setColour (juce::Colour (0xFF28282E));
-            g.drawLine ((float) sepX, 66.0f, (float) sepX, (float) (60 + ks + 4), 1.0f);
+            // Gradient divider (fades at top/bottom)
+            juce::ColourGradient dg (
+                juce::Colour (0xFF28282E).withAlpha (0.0f), (float) sepX, 60.0f,
+                juce::Colour (0xFF28282E),                  (float) sepX, 66.0f, false);
+            dg.addColour (0.5, juce::Colour (0xFF2C2C34));
+            dg.addColour (1.0, juce::Colour (0xFF28282E).withAlpha (0.0f));
+            g.setGradientFill (dg);
+            g.drawVerticalLine (sepX, 66.0f, (float) (60 + ks + 4));
         }
     }
 }
