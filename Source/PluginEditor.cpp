@@ -123,6 +123,43 @@ void VaStringReimplAudioProcessorEditor::resized()
     keyboard.setBounds (12, getHeight() - 92, getWidth() - 24, 80);
 }
 
+// ─── Computer keyboard → MIDI ─────────────────────────────────────────────
+
+static const struct { int key; int note; } keyMap[] = {
+    { 'a', 48 }, { 'w', 49 }, { 's', 50 }, { 'e', 51 }, { 'd', 52 },
+    { 'f', 53 }, { 't', 54 }, { 'g', 55 }, { 'y', 56 }, { 'h', 57 },
+    { 'u', 58 }, { 'j', 59 }, { 'k', 60 }, { 'o', 61 }, { 'l', 62 },
+    { 'p', 63 }, { ';', 64 },
+    { 'z', 36 }, { 'x', 37 }, { 'c', 38 }, { 'v', 39 }, { 'b', 40 },
+    { 'n', 41 }, { 'm', 42 },
+};
+
+bool VaStringReimplAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    auto chr = key.getTextCharacter();
+    for (const auto& m : keyMap) {
+        if (chr == m.key) {
+            proc.getKeyboardState().noteOn (1, m.note, 0.8f);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool VaStringReimplAudioProcessorEditor::keyStateChanged (bool)
+{
+    // Release notes when keys are released
+    for (const auto& m : keyMap) {
+        if (! juce::KeyPress::isKeyCurrentlyDown (m.key)) {
+            // Only turn off if the key is actually up (state changed)
+            if (proc.getKeyboardState().isNoteOn (1, m.note)) {
+                proc.getKeyboardState().noteOff (1, m.note, 0.0f);
+            }
+        }
+    }
+    return true;
+}
+
 // ─── Paint ───────────────────────────────────────────────────────────────────
 
 void VaStringReimplAudioProcessorEditor::paint (juce::Graphics& g)

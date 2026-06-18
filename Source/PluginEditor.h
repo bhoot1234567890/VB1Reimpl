@@ -15,6 +15,8 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool) override;
 
 private:
     VaStringReimplAudioProcessor& proc;

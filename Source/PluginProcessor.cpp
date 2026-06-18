@@ -26,7 +26,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout VaStringReimplAudioProcessor
 }
 
 VaStringReimplAudioProcessor::VaStringReimplAudioProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Out", juce::AudioChannelSet::stereo(), false)),
+    : AudioProcessor (BusesProperties().withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", makeLayout())
 {
     for (int i = 0; i < vb1::kNumVoices; ++i)
@@ -69,8 +69,8 @@ void VaStringReimplAudioProcessor::prepareToPlay (double sampleRate, int)
 
 bool VaStringReimplAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto out = layouts.getMainOutputChannelSet();
-    return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
+    // Accept any non-disabled output layout so the standalone wrapper can connect
+    return layouts.getMainOutputChannelSet() != juce::AudioChannelSet::disabled();
 }
 
 void VaStringReimplAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
@@ -78,7 +78,11 @@ void VaStringReimplAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 {
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
+
+    // Inject keyboard state events (from on-screen + computer keyboard)
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+
+    // Render synth
     synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
 }
 
