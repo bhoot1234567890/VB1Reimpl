@@ -1,237 +1,213 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/C%2B%2B-17-blue?logo=c%2B%2B" alt="C++17">
+  <a href="https://github.com/bhoot1234567890/VB1Reimpl/actions/workflows/build.yml">
+    <img src="https://github.com/bhoot1234567890/VB1Reimpl/actions/workflows/build.yml/badge.svg" alt="Build Plugins">
+  </a>
+  <img src="https://img.shields.io/badge/C%2B%2B-17-blue?logo=c%2B%2B&logoColor=white" alt="C++17">
   <img src="https://img.shields.io/badge/JUCE-8.0.4-orange" alt="JUCE 8.0.4">
-  <img src="https://img.shields.io/badge/macOS-arm64%20%7C%20x86__64-silver?logo=apple" alt="macOS">
-  <img src="https://img.shields.io/badge/error%20RMS%20vs%20original--109%20dB-brightgreen" alt="Error RMS">
-  <img src="https://img.shields.io/badge/license-Personal%20Use%20Only-lightgrey" alt="License">
+  <img src="https://img.shields.io/badge/formats-VST3%20%7C%20AU%20%7C%20Standalone-9cf" alt="Plugin formats">
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platforms">
+  <img src="https://img.shields.io/badge/A%2FB%20error%20RMS-109%20dB-brightgreen" alt="A/B error RMS">
 </p>
 
 # VB-1 Reimplementation
 
-> A native arm64 reconstruction of Steinberg's VB-1 virtual bass synth — reverse-engineered from the 2001 VST2 binary and verified to **−109 dB** (float noise floor) against the original.
+> A native, modern rebuild of Steinberg's VB-1 physical-modeling bass synth — reverse-engineered from the 2001 VST2 binary and verified to **−109 dB** against the original.
 
-JUCE-based VST3/AU plugin. Digital waveguide synthesis with 8-voice polyphony, 16 factory presets, 6 performance parameters, and a Shape-controlled wavetable excitation system. Built for macOS (arm64 + x86_64 universal).
-
----
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [What is this?](#what-is-this)
-- [Fidelity Status](#fidelity-status)
-- [Parameters](#parameters)
-- [DSP Architecture](#dsp-architecture)
-- [The Reverse-Engineering Journey](#the-reverse-engineering-journey)
-- [Project Structure](#project-structure)
-- [Tools](#tools)
-- [License](#license)
+The VB-1 is a digital-waveguide "virtual bassist" from the early VST era — the same family as Karplus-Strong, but with bidirectional delay lines, a movable pickup, and a wavetable-driven excitation. It sounds organic and expressive in a way sample-based bass plugins don't. The catch: it shipped as a **VST2, PowerPC/Intel-only** binary that no modern host on Apple Silicon will load. This project reconstructs every DSP path in C++17/JUCE, ports it to VST3/AU/Standalone, and proves the result is perceptually identical to the original — error below the 32-bit float noise floor.
 
 ---
 
-## Quick Start
+## ✨ Features
+
+- **Faithful waveguide synthesis** — bidirectional delay lines with inverting terminations, a one-pole loop lowpass, and a movable pickup for comb-filter timbre shaping, ported line-by-line from the Ghidra-decompiled binary.
+- **8-voice polyphony** with voice stealing, exactly like the original's `VaStringVoices` manager.
+- **16 factory programs** (Bassic Bass → Synth Bass 3) using the original's *exact* float parameter values, read back via `getParameter` — not rounded approximations.
+- **All 6 parameters decoded** — Damper, PickUp, Pick, Release, Shape, Volume — each mapped to its verified DSP effect.
+- **Per-program excitation wavetables** — the 11 unique 4096-sample tables the Shape parameter drives, dumped from the original and embedded directly.
+- **Cross-platform build** — universal VST3, AU, and a double-clickable Standalone app, built and tested on macOS, Windows, and Linux via CI.
+- **Custom dark/amber UI** with arc knobs, a 16-program selector, and an on-screen keyboard that also responds to your computer QWERTY keys.
+
+---
+
+## 📦 Installation
+
+**Prerequisites**
+
+- A C++17 compiler (clang/Xcode on macOS, MSVC on Windows, GCC on Linux)
+- [CMake](https://cmake.org/) ≥ 3.22
+- The [JUCE](https://github.com/juce-framework/JUCE) framework (cloned in step 1 below — no system install needed)
+- Linux only: ALSA / X11 / FreeType / GTK / GL system headers (see the [CI workflow](.github/workflows/build.yml) for the exact apt packages)
+
+**Build**
 
 ```bash
-# 1. Clone JUCE (tag 8.0.4)
+# 1. Clone JUCE 8.0.4 (the version this project targets)
 git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE
 
-# 2. Configure
+# 2. Configure — point CMake at the JUCE checkout
 cmake -B build -DJUCE_DIR=$PWD/JUCE -DCMAKE_BUILD_TYPE=Release
 
-# 3. Build & auto-install to ~/Library/Audio/Plug-Ins/
+# 3. Build the VST3, AU, and Standalone
 cmake --build build --config Release -j
-
-# Restart your DAW — "VB-1 reimpl" appears under Instruments.
 ```
 
-**Universal binary (arm64 + x86_64):** add `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`.
+On macOS, `COPY_PLUGIN_AFTER_BUILD` auto-installs the plugins into `~/Library/Audio/Plug-Ins/`. For a **universal** (arm64 + x86_64) binary, add `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` to the configure step.
 
----
-
-## What is this?
-
-Steinberg's VB-1 is a physical-modeling bass synthesizer from the early VST era (~2001). It uses a digital waveguide to model a plucked string — the same family of synthesis as Karplus-Strong, but with bidirectional delay lines, a loop lowpass, and a movable pickup for comb-filter timbre shaping. The result is an unusually organic, expressive bass sound that modern sample-based plugins struggle to replicate.
-
-The problem: **VB-1 is VST2-only**, compiled for PowerPC/Intel, and won't load in modern DAWs on Apple Silicon. Ableton, Logic, and other hosts have dropped VST2. Rosetta is deprecated. The plugin is effectively stranded.
-
-This project reverse-engineers the original binary using Ghidra, rebuilds every DSP path in modern C++/JUCE, and verifies the result is **perceptually identical** — error RMS of **−109.26 dB** (below the 32-bit float noise floor), with all 16 presets matching at 0.00 dB peak difference.
-
----
-
-## Fidelity Status
-
-**Complete.** All 6 parameters are structurally decoded, Ghidra-verified, and runtime-confirmed.
-
-| Metric | Value |
-|---|---|
-| **Error RMS** | **−109.26 dB** (float noise floor) |
-| **Peak error** | −89.02 dB |
-| **Spectral delta** | −34.34 dB |
-| **Per-program peak diff** | All 16 programs: < 1.6 × 10⁻⁵ |
-| **Signal RMS** | −20.24 / −20.24 dB (identical) |
-
-### Parameter status
-
-| # | Parameter | Status | How it works (Ghidra-verified) |
-|---|---|---|---|
-| 0 | **Damper** | ✅ Decoded | Drives the loop lowpass `g` and a minute pitch detune when < 0.5. `g = 1 − min(0.9, (float)((9600/N) × 0.0125 × (Damper×0.8 + 0.1f)))` |
-| 1 | **PickUp** | ✅ Decoded | Pickup position: `(PickUp/6 + 1/64) × N` |
-| 2 | **Pick** | ✅ Decoded | Pluck split: `int(Pick × 0.5 × N)` — divides the string into rising/falling segments |
-| 3 | **Release** | ✅ Decoded | At note-off, `g` switches to this value. Linear envelope from 1.0→0 over `max(256, int(SR × 2.5 × (1−Release)))` samples |
-| 4 | **Shape** | ✅ Decoded | Wavetable oscillator: 4 banks × 256 morph positions → fills a 4096-float excitation table. Shape=0 → flat 0.5 (clean); Shape=1 → white noise (rough) |
-| 5 | **Volume** | ✅ Decoded | Output gain: `gainL = (1−pan) × Volume × (vel/127) × 0.7795` |
-
----
-
-## Parameters
-
-| # | Parameter | Range | Description |
-|---|---|---|---|
-| 0 | **Damper** | 0.0 – 1.0 | String damping and brightness. Low = bright snappy attack; high = muted, warm |
-| 1 | **PickUp** | 0.0 – 1.0 | Pickup position along the string. Comb-filter character — bridge = nasally, neck = round |
-| 2 | **Pick** | 0.0 – 1.0 | Pluck position. Splits the excitation envelope — sharp at bridge, soft at center |
-| 3 | **Release** | 0.0 – 1.0 | Note decay. At note-off, becomes the loop lowpass `g` + controls linear envelope duration |
-| 4 | **Shape** | 0.0 – 1.0 | Excitation texture. 0 = clean triangular ramp; 1 = white noise. Morphs through 4 wavetable banks |
-| 5 | **Volume** | 0.0 – 1.0 | Output level |
-
----
-
-## DSP Architecture
-
-```
-                    Shape Parameter
-                         │
-                         ▼
-               ┌─────────────────────┐
-               │  Wavetable Oscillator │  4 banks × 256 morph positions
-               │  fills 4096-float    │  setParameter handler (FUN_0001e494)
-               │  excitation table    │
-               └─────────┬───────────┘
-                         │
-   Note On               ▼
-  ┌─────────┐    ┌───────────────┐    ┌──────────────────────────────────────┐
-  │ Damper  │───▶│  Note-On Init │───▶│         Waveguide Loop               │
-  │ PickUp  │───▶│  (FUN_0001e068)│   │                                      │
-  │ Pick    │───▶│  N, g, pickup, │   │  dlA[N] ◄────── inverted ──────────► │
-  └─────────┘    │  seeder        │   │    │           coupling                │ dlB[N]
-                 └───────────────┘    │    ▼                                  │
-                                      │  pickup ──▶ × env ──▶ × gainL ──▶ out │
-                 Note Off              │  (PickUp)    (linear)   (Volume×vel)  │
-                 ┌─────────┐          └──────────────────────────────────────┘
-                 │ Release │───▶ g switches to Release param
-                 │         │     env = 1.0, dec = 1.0/duration (LINEAR)
-                 └─────────┘     output = pickup × env × gainL
-```
-
-### Key DSP details (all Ghidra-verified)
-
-- **Synthesis**: Bidirectional waveguide, 8-voice polyphonic with voice stealing
-- **Delay line length**: `N = int(SR / (2 × freq_musical)) + 1`, clamped to 9599
-- **Loop lowpass**: `filt = g × filt + (1−g) × dlB[idxB]` where g comes from Damper (sustain) or Release (release)
-- **Inverting termination**: `dlA[idxA] = −(float)filt; dlB[idxB] = −dlA[idxA−1]`
-- **Excitation**: Triangular window seeded from a Shape-dependent wavetable table. Formula: `e = 2 × table[phase] × env − 0.1f`, phase steps by `(float)(1.0/N × 4096)`
-- **g float truncation**: The original truncates the g computation to `(float)` mid-expression — replicated exactly. `0.1f` (not `0.1`) is critical.
-- **Release envelope**: Linear, not exponential. Duration = `max(256, int(SR × 2.5 × (1 − Release)))`. Voice ends deterministically when envelope ≤ 0.
-- **Output gain**: `gainL = 0.5 × Volume × (velocity/127) × 0.7795`, constant across all programs
-- **Panning**: Centered (0.5), constant-power stereo
-
----
-
-## The Reverse-Engineering Journey
-
-The project progressed from −17 dB error to −109 dB through systematic root-cause analysis — every fix driven by understanding the binary, not by coefficient tuning.
-
-| Fix | Error RMS | Root Cause |
-|---|---|---|
-| **Pitch (freq × 2)** | −28.6 dB | Ghidra's frequency function returns 2× musical freq (waveguide period = 2N) |
-| **Seeder (constant 0.5)** | −28.6 dB | The seeder reads a constant-0.5 table, not noise. The noise-table investigation was a red herring |
-| **g float truncation** | −40.4 dB | Original truncates gcoeff to `(float)` and uses float `0.1f`, not double `0.1`. Difference: 3.5 × 10⁻⁹ in g, accumulating over round trips |
-| **kOutGain calibration** | −40.4 dB | Runtime-dumped gainL = 0.245520 → `kOutGain = 0.7795` |
-| **Shape wavetable tables** | −40.4 dB | Shape fills a 4096-float excitation table via 4-bank wavetable crossfade. 16 tables dumped from original and hardcoded |
-| **Linear release envelope** | −63.5 dB | At note-off, g switches to Release param. Envelope is LINEAR (1.0→0 over 2205 samples), not exponential |
-| **Render alignment** | −67.0 dB | VST2 host was discarding the first sample of each note |
-| **Exact preset values** | **−109.3 dB** | All 16 presets had rounded floats (e.g., `0.636f` instead of `0.63636398f`). Read exact values via `getParameter` |
-
-**Lesson**: The difference between "close enough" and "exact" is measured in parts per billion — `0.1 ≠ 0.1f`, `0.636 ≠ 0.63636398`. Every constant matters. Verify at runtime, not just in the decompile.
-
----
-
-## Project Structure
-
-```
-.
-├── Source/
-│   ├── VB1DSP.h                  # Waveguide DSP, 16 presets (exact float values)
-│   ├── VB1ExcitationTables.h     # 16 × 4096-float Shape wavetable tables (525 KB, auto-generated)
-│   ├── PluginProcessor.h/cpp     # AudioProcessor + APVTS + 8-voice Synthesiser
-│   ├── PluginEditor.h/cpp        # 6-knob GUI + program selector
-│   └── JuceHeader.h
-├── tools/
-│   ├── vst2_render.c             # Headless VST2 host for original (Rosetta) + dumpvoices mode
-│   ├── render_reimpl.cpp         # Headless reimpl renderer with state-dump support
-│   ├── ab_diff.py                # A/B comparison: RMS, peak, spectral delta
-│   ├── cma_fit.py                # CMA-ES fitter (abandoned — spectral metrics are gameable)
-│   ├── generate_test_midi.py     # Test MIDI exercising all 16 programs
-│   └── package.sh                # Codesign + install
-├── docs/
-│   ├── VB1_spectrograms.png      # A/B spectrogram comparison (final: −109 dB)
-│   ├── VB1_ab_diff.png           # Waveform overlay + difference signal
-│   ├── VB1_AB_listen.wav         # Narrated A/B listening test
-│   ├── VB1_RE_Spec.md            # Original binary RE specification
-│   ├── VB1_DSP_Reference.cpp     # Reference DSP code from Ghidra decompile
-│   ├── VB1_FINDINGS.md           # Key findings and discoveries
-│   └── VB1_FLOAT_PRECISION_PLAN.md  # Final fix documentation
-├── CMakeLists.txt                # Build: VST3 + AU plugin + headless renderer
-├── BUILD.md                      # Detailed build notes
-└── AGENTS.md                     # Agent/automation guidelines
-```
-
----
-
-## Tools
-
-### A/B Comparison
+**Codesign & install (macOS)**
 
 ```bash
-# Render original (requires Rosetta)
-arch -x86_64 ./tools/vst2_render <path-to-vb1.vst-binary> /tmp/original.wav
-
-# Render reimpl
-./build/VB1Render_artefacts/Release/VB1Render /tmp/reimpl.wav
-
-# Compare
-python tools/ab_diff.py /tmp/original.wav /tmp/reimpl.wav --plot diff.png
-```
-
-The diff tool cross-correlation-aligns the renders, then reports time-domain (RMS, peak) and spectral (per-block FFT) differences.
-
-### Voice State Dump
-
-```bash
-# Dump the original's internal voice state for RCA
-arch -x86_64 ./tools/vst2_render <binary> /tmp/x.wav dumpvoices
-```
-
-The `dumpvoices` mode walks the original's live memory (`AEffect.object → +0x40f8 → +0x2b8 → voice`) and reads the delay-line contents, filter coefficients, and excitation tables for all 16 programs.
-
-### Headless Renderer
-
-```bash
-./build/VB1Render_artefacts/Release/VB1Render output.wav        # full 36s render
-./build/VB1Render_artefacts/Release/VB1Render output.wav short  # program 0 state dump
-```
-
-### Package & Install
-
-```bash
-# Ad-hoc codesign (local use)
+# Ad-hoc sign and copy into the system plug-in folders
 tools/package.sh
 
-# Distribution signing
-DEV_ID="Developer ID: Name (TEAMID)" tools/package.sh
+# Or sign for distribution with a Developer ID
+DEV_ID="Developer ID Application: Your Name (TEAMID)" tools/package.sh
 ```
 
 ---
 
-## License
+## 🚀 Usage
 
-Personal use only. The original VB-1 is a copyrighted Steinberg product. Do not redistribute a derived plugin or its assets. The excitation tables in `VB1ExcitationTables.h` are extracted from the original binary and are included for personal compatibility testing only.
+Restart your DAW after installing — **"VB-1 reimpl"** appears under Instruments (VST3 on Windows/Linux, AU on macOS). Or run the **Standalone** app directly (`VB-1 reimpl.app`) with no DAW required.
+
+In the plugin window:
+
+- Turn the six knobs to shape the tone, or pick one of the **16 factory programs** from the top-right selector.
+- Play the on-screen keyboard with the mouse, or use your computer keyboard — the bottom row (`Z X C V B N M`) are the white keys, with `S D G H J` as the sharps in between.
+- Sustain pedal, CC7 (volume), CC10 (pan), and pitch-bend are all wired up, matching the original's MIDI surface.
+
+---
+
+## ⚙️ Parameters
+
+The six parameters in host order, each mapped to a verified stage of the waveguide:
+
+| # | Parameter | Range | What it controls |
+|---|---|---|---|
+| 0 | **Damper** | 0.0 – 1.0 | String damping and brightness. Drives the loop lowpass `g` and a minute pitch detune below 0.5. Low = bright and snappy; high = muted and warm. |
+| 1 | **PickUp** | 0.0 – 1.0 | Pickup position: `(PickUp/6 + 1/64) × N`. The comb-filter character — bridge = nasally, neck = round. |
+| 2 | **Pick** | 0.0 – 1.0 | Pluck position: splits the excitation into rising/falling segments at `int(Pick × 0.5 × N)`. Sharp at the bridge, soft toward the center. |
+| 3 | **Release** | 0.0 – 1.0 | At note-off, `g` switches to this value and a *linear* envelope ramps 1.0 → 0 over `max(256, SR × 2.5 × (1−Release))` samples. |
+| 4 | **Shape** | 0.0 – 1.0 | Excitation texture via a 4-bank wavetable. 0 = flat 0.5 (clean triangular ramp); 1 = noise-like (rough). |
+| 5 | **Volume** | 0.0 – 1.0 | Output gain: `gainL = (1−pan) × Volume × (velocity/127) × 0.7795`. |
+
+---
+
+## 🧱 Architecture
+
+Each note is one `VaStringVoice` — a bidirectional digital waveguide with inverting terminations, ported from the original's render loop (`FUN_0001dd10` sustain / `0x1de62` release). Eight of them are mixed additively by a JUCE `Synthesiser`.
+
+```mermaid
+flowchart TD
+    MIDI["MIDI Note-On<br/>(note, velocity)"] --> N["Delay length<br/>N = SR / (2·f) + 1"]
+    Shape["Shape"] --> WT["Wavetable oscillator<br/>fills 4096-sample excitation table"]
+    WT --> SEED["Seed dlA / dlB<br/>triangular window × table"]
+    Pick["Pick"] --> SEED
+    SEED --> WG["Bidirectional waveguide<br/>dlA ⇄ dlB with inverting terminations"]
+
+    Damper["Damper"] --> Gs["Loop lowpass g (sustain)"]
+    Release["Release"] --> Gr["Loop lowpass g (release)<br/>+ linear decay envelope"]
+    Gs --> WG
+    Gr --> WG
+
+    PickUp["PickUp"] --> PK["Pickup read offset<br/>(comb filter)"]
+    WG --> PK
+    PK --> ENV["× envelope"]
+    Gr --> ENV
+    ENV --> OUTG["× gainL / gainR<br/>Volume × velocity × 0.7795"]
+    Volume["Volume"] --> OUTG
+    OUTG --> OUT(["Stereo output"])
+```
+
+**Key DSP details (all Ghidra-verified):**
+
+- **Pitch** — `N = int(SR / (2 × freq)) + 1`, clamped to 9599. The original uses *2×* the musical frequency because the waveguide period is `2N`.
+- **Loop lowpass** — `filt = g·filt + (1−g)·dlB[idxB]`, where `g` comes from Damper in sustain and Release at note-off.
+- **Float-exact `g`** — the original truncates the coefficient to `(float)` mid-expression and uses the float literal `0.1f` (not `0.1`). Replicated exactly; the 3.5 × 10⁻⁹ difference accumulates over thousands of round trips.
+- **Inverting terminations** — `dlA[idxA] = −(float)filt;  dlB[idxB] = −dlA[idxA−1]`.
+- **Linear release** — not exponential. The voice ends deterministically when the envelope crosses zero.
+
+The full reverse-engineering spec, the decompiled DSP reference, and the root-cause analysis live in [`docs/`](docs/).
+
+---
+
+## 🔬 Fidelity
+
+The plugin is verified against the original via a headless A/B pipeline (see [Tools](#-tools)): the same MIDI drives the original VB-1 (under Rosetta, via a minimal VST2 host) and this reimplementation, then `ab_diff.py` cross-correlation-aligns the two renders and reports time- and frequency-domain deltas.
+
+| Metric | Result |
+|---|---|
+| **Error RMS** | **−109.26 dB** (below the 32-bit float noise floor) |
+| Peak error | −89.02 dB |
+| Spectral delta | −34.34 dB |
+| Per-program peak diff | All 16 programs < 1.6 × 10⁻⁵ |
+| Signal RMS | −20.24 / −20.24 dB (identical) |
+
+<p align="center">
+  <img src="docs/VB1_spectrograms.png" alt="Spectrogram comparison of the original VB-1 (top) versus this reimplementation (bottom) across the 16 factory programs — visually indistinguishable">
+</p>
+
+The match was reached through systematic root-cause analysis — each fix driven by reading the binary, not by coefficient tuning:
+
+| Fix | Error RMS | Root cause |
+|---|---|---|
+| Pitch (`freq × 2`) | −28.6 dB | Ghidra's frequency function returns 2× musical frequency (waveguide period = 2N). |
+| Seeder (constant 0.5) | −28.6 dB | The seeder reads a constant-0.5 table, not noise — the noise-table path was a red herring. |
+| `g` float truncation | −40.4 dB | The original truncates `g` to `(float)` and uses `0.1f`; the 3.5 × 10⁻⁹ gap accumulates over round trips. |
+| `kOutGain` calibration | −40.4 dB | Runtime-dumped `gainL = 0.245520` → `kOutGain = 0.7795`. |
+| Shape wavetables | −40.4 dB | Shape fills a 4096-sample excitation table via a 4-bank crossfade; tables dumped from the original. |
+| Linear release envelope | −63.5 dB | At note-off `g` switches to Release and a *linear* envelope runs 1.0 → 0. |
+| Render alignment | −67.0 dB | The VST2 host was discarding the first sample of each note. |
+| Exact preset values | **−109.3 dB** | All 16 presets held rounded floats (`0.636` vs `0.63636398`); exact values read via `getParameter`. |
+
+The lesson, in the project's own words: the gap between "close enough" and "exact" is measured in parts per billion — `0.1 ≠ 0.1f`, `0.636 ≠ 0.63636398`. Bit-exactness across x86_64-vs-arm64 floats is not expected; −109 dB is the float noise floor and is inaudible.
+
+---
+
+## 🛠️ Tools
+
+The `tools/` directory is the reverse-engineering and verification pipeline:
+
+```bash
+# Render the original VB-1 headlessly (requires Rosetta + the original .vst binary)
+arch -x86_64 ./tools/vst2_render <path-to-vb1-binary> /tmp/original.wav
+
+# Render this reimplementation to WAV (built as the VB1Render console app)
+./build/VB1Render_artefacts/Release/VB1Render /tmp/reimpl.wav
+
+# Compare the two renders — RMS, peak, and per-block spectral delta
+python tools/ab_diff.py /tmp/original.wav /tmp/reimpl.wav --plot docs/VB1_ab_diff.png
+```
+
+| Tool | Role |
+|---|---|
+| `vst2_render.c` | Minimal headless VST2 host for the original (run under Rosetta). A `dumpvoices` mode walks the original's live memory and reads its delay lines, filter coefficients, and excitation tables. |
+| `render_reimpl.cpp` | Headless renderer for this DSP, built as the `VB1Render` JUCE console app. Drives the same MIDI sequence for a directly comparable render. |
+| `ab_diff.py` | Cross-correlation-aligns the two renders, then reports time-domain (RMS, peak) and spectral (per-block FFT) differences. |
+| `generate_test_midi.py` | Emits `vb1_test.mid` — a bass run across all 16 programs — to drive both plugins identically. |
+| `cma_fit.py` | Derivative-free (CMA-ES) coefficient fitter. Documented as a cautionary tale: spectral metrics are gameable, so physical parameters stay locked to verified values. |
+| `package.sh` | Codesigns (ad-hoc or Developer ID) and installs the built VST3/AU. |
+
+---
+
+## 📚 Documentation
+
+Deep-dive material lives in [`docs/`](docs/) and [`BUILD.md`](BUILD.md):
+
+- [`VB1_RE_Spec.md`](docs/VB1_RE_Spec.md) — the authoritative reverse-engineering spec: binary layout, AEffect struct, class architecture, the decoded render loop.
+- [`VB1_DSP_Reference.cpp`](docs/VB1_DSP_Reference.cpp) — reference DSP lifted from the Ghidra decompile.
+- [`VB1_FINDINGS.md`](docs/VB1_FINDINGS.md) — what's solid, open questions, and dead-ends to avoid repeating.
+- [`VB1_FLOAT_PRECISION_PLAN.md`](docs/VB1_FLOAT_PRECISION_PLAN.md) — the Shape-parameter and float-precision fix write-ups.
+- [`VB1_RCA_PLAN.md`](docs/VB1_RCA_PLAN.md) — the first-principles root-cause-analysis methodology.
+- [`VB1_ab_diff.png`](docs/VB1_ab_diff.png) / [`VB1_AB_listen.wav`](docs/VB1_AB_listen.wav) — waveform overlay and a narrated A/B listening test.
+
+---
+
+## 🤝 Contributing
+
+This is a personal reverse-engineering project. The DSP is structurally complete and verified; there are no open feature tasks. If you spot a fidelity regression or a build issue, please open an issue with the `ab_diff.py` output or the CI log attached.
+
+---
+
+## 📄 License
+
+**Personal use only.** The original VB-1 is a copyrighted Steinberg product. Do not redistribute a derived plugin or its assets. The excitation tables in `Source/VB1ExcitationTables.h` were extracted from the original binary and are included for personal compatibility testing only. There is no open-source license attached to this repository.
