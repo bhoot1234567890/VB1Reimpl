@@ -12,3 +12,6 @@ JUCE/
 build_uni/
 build_host/
 *.wav
+__pycache__/
+*.log
+.wrangler/

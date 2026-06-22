@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VB-1 waveguide (web)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="startOverlay" class="overlay">
+    <div class="card">
+      <h1>VB-1 waveguide</h1>
+      <p>Web port of the VB-1 bass synth. Real excitation tables, 8-voice polyphony,
+         playable with mouse or computer keyboard.</p>
+      <button id="startBtn">Start</button>
+      <p class="hint">Click to enable audio (browsers require a gesture).</p>
+      <p id="status" class="status"></p>
+    </div>
+  </div>
+
+  <div id="studio" class="studio" style="display:none;">
+    <header>
+      <h1>VB-1 waveguide <span class="sub">web</span></h1>
+      <div class="meta"><span id="sr"></span> · 8-voice · worklet DSP</div>
+    </header>
+
+    <section class="panel">
+      <h2>Program <span class="muted">(selects the real excitation table)</span></h2>
+      <select id="program"></select>
+    </section>
+
+    <section class="panel">
+      <h2>Parameters <span class="muted">(next note; Volume is live)</span></h2>
+      <div class="sliders">
+        <label>Damper <input type="range" id="damper" min="0" max="1" step="0.001" /><span class="v" id="damperVal"></span></label>
+        <label>PickUp <input type="range" id="pickup" min="0" max="1" step="0.001" /><span class="v" id="pickupVal"></span></label>
+        <label>Pick <input type="range" id="pick" min="0" max="1" step="0.001" /><span class="v" id="pickVal"></span></label>
+        <label>Release <input type="range" id="release" min="0" max="1" step="0.001" /><span class="v" id="releaseVal"></span></label>
+        <label>Shape <input type="range" id="shape" min="0" max="1" step="0.001" /><span class="v" id="shapeVal"></span></label>
+        <label>Volume <input type="range" id="volume" min="0" max="1" step="0.001" /><span class="v" id="volumeVal"></span></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Scope</h2>
+      <canvas id="scope" width="900" height="120"></canvas>
+    </section>
+
+    <section class="panel">
+      <h2>Keyboard <span class="muted">A S D F G H J K · sharps W E T Y U · octave Z / X</span></h2>
+      <canvas id="piano"></canvas>
+      <div class="row"><button id="allOff">All notes off</button> <span id="status" class="status"></span></div>
+    </section>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

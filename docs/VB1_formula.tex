@@ -1,0 +1,159 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+
+\title{VB-1 Waveguide --- Complete Parameter Formula}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Parameters (host order)}
+
+\begin{center}
+\begin{tabular}{c l c l}
+\toprule
+sym & param & range & name \\
+\midrule
+$D$ & 0 & $[0,1]$ & Damper \\
+$U$ & 1 & $[0,1]$ & PickUp \\
+$P$ & 2 & $[0,1]$ & Pick \\
+$R$ & 3 & $[0,1]$ & Release \\
+$S$ & 4 & $[0,1]$ & Shape \\
+$V$ & 5 & $[0,1]$ & Volume \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Scalars: $v$ = MIDI velocity normalized to $[0,1]$;\;
+$s_r$ = sample rate;\;
+$m$ = MIDI note number.
+
+\section*{Note-on (compute once)}
+
+Frequency (12-TET with minute Damper detune $\le 2.8$\,cents when $D<0.5$):
+\[
+f = 880\cdot 2^{\,\frac{m-69}{12}+\delta},
+\qquad
+\delta =
+\begin{cases}
+\dfrac{0.5-D}{18} & D < 0.5 \\[6pt]
+0 & D \ge 0.5
+\end{cases}
+\]
+
+Delay-line length:
+\[
+N = \min\!\left(\frac{s_r}{f}+1,\; 9599\right)
+\]
+
+Loop-filter coefficient (one-pole):
+\[
+g = 1 - \min\!\Bigl(0.9,\;\operatorname{float}\!\Bigl(\tfrac{9600}{N}\cdot 0.0125 \cdot (0.8D + 0.1)\Bigr)\Bigr)
+\]
+
+Pickup position and pluck split:
+\[
+pk = \operatorname{clamp}\!\left(\left\lfloor\left(\tfrac{U}{6}+\tfrac{1}{64}\right)N\right\rfloor,\;0,\;N-1\right),
+\qquad
+r = \max\!\left(1,\;\left\lfloor 0.5\,P\,N\right\rfloor\right)
+\]
+
+Excitation seed into both delay lines (Shape-indexed table $T_S$ of 4096 floats;
+$T_0 \equiv 0.5$). Phase $\phi$ starts at $0$, advances by $\Delta_\phi = 4096/N$:
+\[
+\text{dlA}_i = \text{dlB}_i =
+\begin{cases}
+2\,T_S\!\bigl[\lfloor\phi_i\rfloor \,\&\, \mathrm{0xFFF}\bigr]\cdot\dfrac{i}{r}-0.1 & 0 \le i < r \\[8pt]
+2\,T_S\!\bigl[\lfloor\phi_i\rfloor \,\&\, \mathrm{0xFFF}\bigr]\cdot\dfrac{N-1-i}{\max(1,\,N-1-r)}-0.1 & r \le i < N
+\end{cases}
+\]
+\[
+\phi_{i+1} = \phi_i + \Delta_\phi
+\]
+
+Output gains ($\text{pan} = 0.5$, $k_{\text{out}} = 0.7795$):
+\[
+\text{gain}_L = (1-\text{pan})\,V\,v\,k_{\text{out}} = 0.5\,V\,v\cdot 0.7795
+\]
+\[
+\text{gain}_R = \text{pan}\,V\,v\,k_{\text{out}} = 0.5\,V\,v\cdot 0.7795
+\]
+
+\section*{Per-sample render}
+
+Pickup read (comb output):
+\[
+\text{pick}_s = \text{dlB}\!\left[(\text{idxB}+pk)\bmod N\right]
+\]
+
+One-pole loop lowpass ($g$ carries $D$ in sustain, $R$ in release):
+\[
+\text{filt}_s = g\cdot \text{filt}_{s-1} + (1-g)\cdot \text{dlB}[\text{idxB}]
+\]
+
+Bidirectional coupling (inverted):
+\[
+\text{dlA}[\text{idxA}] = -\text{filt}_s,
+\qquad
+\text{dlB}[\text{idxB}] = -\text{dlA}\!\left[(\text{idxA}+N-1)\bmod N\right]
+\]
+
+Advance indices:
+\[
+\text{idxA} \leftarrow (\text{idxA}-1+N)\bmod N,
+\qquad
+\text{idxB} \leftarrow (\text{idxB}+1)\bmod N
+\]
+
+Output (sustain: $\text{env}=1$; release: $\text{env}$ ramp):
+\[
+\boxed{\;\text{out}_s = \text{pick}_s \cdot \text{env}_s \cdot \text{gain}_L\;}
+\]
+
+\section*{Note-off $\to$ Release}
+
+At note-off, $R$ replaces $g$ and a linear envelope begins:
+\[
+g \leftarrow R,
+\qquad
+\text{env}_s = \max\!\left(0,\;1 - s\cdot\Delta_R\right),
+\qquad
+\Delta_R = \frac{1}{\max\!\bigl(256,\;2.5\,s_r(1-R)\bigr)}
+\]
+
+When $\text{env}_s \le 0$, the voice is deactivated.
+
+\section*{Parameter $\to$ stage map}
+
+\begin{center}
+\begin{tabular}{c l l}
+\toprule
+param & enters at & role \\
+\midrule
+$D$ (Damper) & note-on, sustain & sets $g$ and detune $\delta$ \\
+$U$ (PickUp) & note-on & comb offset $pk$ \\
+$P$ (Pick) & note-on & seed split $r$ \\
+$R$ (Release) & note-off & replaces $g$, sets env length \\
+$S$ (Shape) & note-on & selects excitation table $T_S$ \\
+$V$ (Volume) & note-on / param-change & scalar on $\text{gain}_{L,R}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{One-line summary}
+
+\[
+\text{out}_s
+= \underbrace{\text{dlB}\!\left[(\text{idxB}+pk)\bmod N\right]}_{\text{pick, by } U}
+\cdot \text{env}_s(R)
+\cdot \underbrace{0.5\,V\,v\cdot 0.7795}_{\text{gain, by } V}
+\]
+
+Delay-line state is updated each sample by a one-pole filter whose coefficient $g$
+is set by $D$ in sustain and $R$ in release; the initial contents of
+$\text{dlA},\text{dlB}$ are shaped by $P$ (split) and $S$ (table).
+
+\end{document}
