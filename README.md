@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/formats-VST3%20%7C%20AU%20%7C%20Standalone-9cf" alt="Plugin formats">
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platforms">
   <img src="https://img.shields.io/badge/A%2FB%20error%20RMS-109%20dB-brightgreen" alt="A/B error RMS">
+  <a href="https://vb1-waveguide.pages.dev"><img src="https://img.shields.io/badge/%E2%96%B6%20web%20demo-live-39c0ff" alt="Web demo"></a>
 </p>
 
 # VB-1 Reimplementation
@@ -77,6 +78,26 @@ In the plugin window:
 
 ---
 
+## 🌐 Web & Python frontends
+
+The same verified waveguide DSP runs outside the plugin — a browser app and a desktop GUI, both sharing the exact `g` / `N` / pickup / pluck / release math and the real per-program excitation tables.
+
+**Web (live):** <https://vb1-waveguide.pages.dev> — an [AudioWorklet](web/vb1-worklet.js) synth, 8-voice polyphony, playable with the mouse or the computer keyboard (`A S D F G H J K`, sharps `W E T Y U`, octave `Z`/`X`). The 11 excitation tables are generated from `Source/VB1ExcitationTables.h` by [`tools/gen_web.py`](tools/gen_web.py); `Math.fround` replicates the binary's `(float)` cast.
+
+```bash
+cd web && python -m http.server 8000   # AudioWorklet needs http(s), not file://
+```
+
+**Python desktop:** [`tools/vb1_frontend.py`](tools/vb1_frontend.py) — a Tkinter + `sounddevice` real-time GUI with the same six knobs, 16 programs, and a clickable/typable piano.
+
+```bash
+pip install numpy sounddevice
+python tools/vb1_frontend.py
+```
+
+Both frontends are sonically faithful but not sample-identical to the C++ (which needs the original's dumped noise tables for bit-exactness).
+
+---
 ## ⚙️ Parameters
 
 The six parameters in host order, each mapped to a verified stage of the waveguide:
@@ -185,6 +206,8 @@ python tools/ab_diff.py /tmp/original.wav /tmp/reimpl.wav --plot docs/VB1_ab_dif
 | `ab_diff.py` | Cross-correlation-aligns the two renders, then reports time-domain (RMS, peak) and spectral (per-block FFT) differences. |
 | `generate_test_midi.py` | Emits `vb1_test.mid` — a bass run across all 16 programs — to drive both plugins identically. |
 | `cma_fit.py` | Derivative-free (CMA-ES) coefficient fitter. Documented as a cautionary tale: spectral metrics are gameable, so physical parameters stay locked to verified values. |
+| `vb1_frontend.py` | Real-time Tkinter + `sounddevice` GUI — the same DSP as a playable desktop app. |
+| `gen_web.py` | Regenerates `web/excitation-tables.js` (the 11 real tables) from `Source/VB1ExcitationTables.h` for the web frontend. |
 | `package.sh` | Codesigns (ad-hoc or Developer ID) and installs the built VST3/AU. |
 
 ---
@@ -199,6 +222,7 @@ Deep-dive material lives in [`docs/`](docs/) and [`BUILD.md`](BUILD.md):
 - [`VB1_FLOAT_PRECISION_PLAN.md`](docs/VB1_FLOAT_PRECISION_PLAN.md) — the Shape-parameter and float-precision fix write-ups.
 - [`VB1_RCA_PLAN.md`](docs/VB1_RCA_PLAN.md) — the first-principles root-cause-analysis methodology.
 - [`VB1_ab_diff.png`](docs/VB1_ab_diff.png) / [`VB1_AB_listen.wav`](docs/VB1_AB_listen.wav) — waveform overlay and a narrated A/B listening test.
+- [`VB1_formula.tex`](docs/VB1_formula.tex) — the complete 6-parameter waveguide formula (note-on → per-sample loop → release) as a compilable LaTeX document.
 
 ---
 
